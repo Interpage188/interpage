@@ -19,15 +19,23 @@ from pathlib import Path
 # ============================================================
 
 SYMBOLS = [
-    "BTC",   # filtro global
-    "ETH",   # líder de alts grandes
-    "BNB",   # exchange tokens
-    "SOL",   # L1 alternativas
-    "STX",   # L2 / ecosistema Bitcoin
-    "LTC",   # pago tradicional
-    "DOGE",  # meme / retail
-    "LINK",  # DeFi / oráculos
-    "ENA",   # DeFi nuevos
+    "BTC",
+    "ETH",
+    "BNB",
+    "SOL",
+    "ARB",
+    "UNI",
+    "LTC",
+    "INJ",
+    "LINK",
+    "ENA",
+    "SUSHI",
+    "RAY",
+    "HYPE",
+    "ZEC",
+    "DOGE",
+    "STX",
+    "DASH",
 ]
 
 FREC_EXTREMO_MIN      = 5
