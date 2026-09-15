@@ -1,0 +1,75 @@
+name: RECOLECTOR
+
+permissions:
+  contents: write
+
+on:
+  schedule:
+    # Cada 5 min. Cada moneda decide internamente si guarda según su zona RSI.
+    - cron: '2,7,12,17,22,27,32,37,42,47,52,57 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: recolector
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Check Python syntax
+        run: |
+          python -m py_compile recolector.py
+          echo "✅ Sintaxis OK"
+
+      - name: Run RECOLECTOR
+        run: python recolector.py
+
+      - name: Show cache status
+        if: always()
+        run: |
+          echo "📁 Archivos en data/cache/:"
+          ls -la data/cache/ 2>/dev/null | head -20 || echo "(vacío)"
+
+          echo ""
+          echo "📊 Resumen:"
+          if [ -d data/cache ]; then
+            total=$(ls data/cache/*.json 2>/dev/null | wc -l)
+            echo "   Archivos: $total"
+            du -sh data/cache/ 2>/dev/null
+          fi
+
+      - name: Commit cache
+        if: always()
+        run: |
+          MIN=$(date -u +%M)
+          # Commit solo cada 15 min (min 2, 17, 32, 47) para no inflar git
+          if [ "$MIN" != "02" ] && [ "$MIN" != "17" ] && [ "$MIN" != "32" ] && [ "$MIN" != "47" ]; then
+            echo "⏭️ Skip commit (minuto $MIN no es 2/17/32/47)"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if [ -d data/cache ]; then
+            git add data/cache/
+          fi
+
+          if git diff --staged --quiet; then
+            echo "📭 Sin cambios."
+          else
+            git commit -m "Recolector [skip ci] $(date -u +'%Y-%m-%d %H:%M UTC')"
+            git push
+            echo "✅ Commit OK."
+          fi
