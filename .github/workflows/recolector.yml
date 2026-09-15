@@ -52,13 +52,6 @@ jobs:
       - name: Commit cache
         if: always()
         run: |
-          MIN=$(date -u +%M)
-          # Commit solo cada 15 min (min 2, 17, 32, 47) para no inflar git
-          if [ "$MIN" != "02" ] && [ "$MIN" != "17" ] && [ "$MIN" != "32" ] && [ "$MIN" != "47" ]; then
-            echo "⏭️ Skip commit (minuto $MIN no es 2/17/32/47)"
-            exit 0
-          fi
-
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
