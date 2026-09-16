@@ -9,27 +9,26 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 # ============================================================
-# WATCHER — vigila niveles pendientes y avisa al toque o aproximación
-# Corre junto al recolector cada 5 min
+# WATCHER — solo alarma de lo que multi.py publicó
 #
-# [FIX 2B] Detecta toques por close Y por mecha (high15 / low15)
-# [FIX 3B] Detecta aproximación confirmada: el precio se acercó
-#          al nivel y ya retrocedió (rechazo temprano)
+# No analiza. No consulta OKX. No decide nada.
+# Solo:
+#   1. Lee data/pending_levels.json (lo que multi.py publicó)
+#   2. Lee el precio del cache del recolector
+#   3. Compara y avisa por Telegram:
+#      - POR TOCAR: precio se acercó (≤0.5%)
+#      - TOCÓ: precio llegó (≤0.15% o mecha)
+#   4. Expira si se aleja >1.5% o pasa 24h
 # ============================================================
 
 DATA_DIR = Path("data")
 CACHE_DIR = DATA_DIR / "cache"
 PENDING_FILE = DATA_DIR / "pending_levels.json"
 
-# Umbrales de toque
-TOQUE_PCT = 0.15              # distancia máxima para considerar "toque exacto"
-EXPIRACION_PCT = 1.5          # si el precio se aleja > X% → expira
-MAX_HORAS_VIGENCIA = 24       # niveles más viejos → expiran
-
-# [FIX 3B] Aproximación confirmada
-APROXIMACION_PCT = 0.8        # % máximo de acercamiento al nivel
-APROXIMACION_HORAS = 3        # ventana de tiempo para mirar el cache
-RETROCESO_MIN_PCT = 0.3       # % mínimo de retroceso desde el pico
+TOQUE_PCT = 0.15              # para "tocó"
+CERCA_PCT = 0.50              # para "por tocar"
+EXPIRACION_PCT = 1.5          # alejamiento que expira
+MAX_HORAS_VIGENCIA = 24       # vida máxima del nivel
 
 LIMA_OFFSET_HORAS = -5
 
@@ -53,8 +52,11 @@ def guardar_json(path, data):
         json.dump(data, f, indent=2)
 
 
-def precio_actual(symbol):
-    """Devuelve (precio_close, high15, low15) del último sample."""
+def precio_del_cache(symbol):
+    """
+    Lee del cache del recolector. Devuelve (price, high15, low15).
+    Es solo lectura de números. No es análisis.
+    """
     p = CACHE_DIR / f"{symbol}.json"
     data = leer_json(p)
     if not data:
@@ -70,58 +72,10 @@ def precio_actual(symbol):
     )
 
 
-def aproximacion_confirmada(symbol, nivel, direccion, horas=APROXIMACION_HORAS):
-    """
-    Detecta si el precio se acercó al nivel y ya retrocedió.
-    Devuelve (bool, pico_alcanzado, distancia_al_nivel_pct).
-    """
-    p = CACHE_DIR / f"{symbol}.json"
-    data = leer_json(p)
-    if not data:
-        return False, None, None
-
-    pulso = data.get("pulso", [])
-    if not pulso:
-        return False, None, None
-
-    ahora_ts = ahora_utc().timestamp()
-    limite_ts = ahora_ts - horas * 3600
-
-    precio_actual = pulso[-1].get("price")
-    if precio_actual is None:
-        return False, None, None
-
-    if direccion == "SHORT":
-        highs = [m.get("high15") for m in pulso
-                 if m.get("ts", 0) >= limite_ts and m.get("high15") is not None]
-        if not highs:
-            return False, None, None
-        pico = max(highs)
-        dist = ((nivel - pico) / nivel) * 100
-        if 0 <= dist <= APROXIMACION_PCT:
-            retroceso = ((pico - precio_actual) / pico) * 100
-            if retroceso >= RETROCESO_MIN_PCT:
-                return True, pico, dist
-    elif direccion == "LONG":
-        lows = [m.get("low15") for m in pulso
-                if m.get("ts", 0) >= limite_ts and m.get("low15") is not None]
-        if not lows:
-            return False, None, None
-        piso = min(lows)
-        dist = ((piso - nivel) / nivel) * 100
-        if 0 <= dist <= APROXIMACION_PCT:
-            retroceso = ((precio_actual - piso) / piso) * 100
-            if retroceso >= RETROCESO_MIN_PCT:
-                return True, piso, dist
-
-    return False, None, None
-
-
 def enviar_telegram(msg):
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
-        print("⚠️ Telegram no configurado", flush=True)
         return False
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     data = f"chat_id={urllib.parse.quote(str(chat_id))}&text={urllib.parse.quote(msg)}".encode("utf-8")
@@ -133,13 +87,8 @@ def enviar_telegram(msg):
     try:
         with urllib.request.urlopen(req, timeout=15) as r:
             result = json.loads(r.read().decode("utf-8"))
-        if result.get("ok"):
-            print("📨 Telegram enviado", flush=True)
-            return True
-        print(f"⚠️ Telegram devolvió: {result}", flush=True)
-        return False
-    except Exception as e:
-        print(f"⚠️ Error Telegram: {e}", flush=True)
+        return result.get("ok", False)
+    except Exception:
         return False
 
 
@@ -151,7 +100,7 @@ def main():
     )
 
     print("=" * 70, flush=True)
-    print("🎯 WATCHER — vigila niveles pendientes", flush=True)
+    print("🎯 WATCHER — solo alarma", flush=True)
     print(f"   {ahora.isoformat()}", flush=True)
     print("=" * 70, flush=True)
 
@@ -163,6 +112,7 @@ def main():
     print(f"📋 {len(levels)} niveles pendientes", flush=True)
 
     tocados = 0
+    por_tocar = 0
     expirados = 0
     esperando = 0
 
@@ -177,6 +127,10 @@ def main():
         symbol = item["symbol"]
         nivel = float(item["level"])
         direccion = item["direction"]
+        score = item.get("score", 0)
+        touch = item.get("touchCount", 0)
+        tf = item.get("timeframe", "?")
+        distancia_emision = item.get("distancia_emision", 0)
 
         # Antigüedad
         emitido = item.get("emitido_en")
@@ -195,85 +149,83 @@ def main():
             except Exception:
                 pass
 
-        precio, high15, low15 = precio_actual(symbol)
+        precio, high15, low15 = precio_del_cache(symbol)
         if precio is None:
             print(f"⚠️ {symbol}: sin precio en cache", flush=True)
             esperando += 1
             continue
 
         distancia_pct = ((precio - nivel) / nivel) * 100
+        dist_abs = abs(distancia_pct)
 
-        # ===== Toque por close =====
-        toque_close = abs(distancia_pct) <= TOQUE_PCT
+        # ===== TOCÓ (close) =====
+        toco_close = dist_abs <= TOQUE_PCT
 
-        # ===== Toque por mecha =====
-        toque_mecha = False
+        # ===== TOCÓ (mecha) =====
+        toco_mecha = False
         mecha_info = ""
         if direccion == "SHORT" and high15 is not None and high15 >= nivel:
-            toque_mecha = True
+            toco_mecha = True
             mecha_info = f"high=${high15:.6f}"
         elif direccion == "LONG" and low15 is not None and low15 <= nivel:
-            toque_mecha = True
+            toco_mecha = True
             mecha_info = f"low=${low15:.6f}"
 
-        # ===== Toque detectado =====
-        if toque_close or toque_mecha:
-            motivo = "Nivel alcanzado" if toque_close else "Mecha tocó el nivel"
-            print(f"🎯 {symbol}: TOQUE ({motivo}) — nivel=${nivel:.6f} precio=${precio:.6f} ({distancia_pct:+.2f}%)", flush=True)
+        if toco_close or toco_mecha:
+            motivo = "Nivel alcanzado" if toco_close else "Mecha tocó el nivel"
+            print(f"🎯 {symbol}: TOCÓ — {motivo}", flush=True)
 
             emoji = "🟢" if direccion == "LONG" else "🔴"
             accion = "COMPRA" if direccion == "LONG" else "VENDE"
 
             msg = (
                 f"{emoji} {accion} {symbol}\n"
-                f"📈 Precio actual: ${precio:.6f}\n"
-                f"📐 Nivel objetivo: ${nivel:.6f}\n"
+                f"📈 Precio: ${precio:.6f}\n"
+                f"📐 Nivel: ${nivel:.6f} ({tf})\n"
+                f"🎯 Score: {score:.1f} | {touch}T\n"
                 f"✅ {motivo}\n"
                 f"🕐 {hora_lima_dt.strftime('%H:%M')} Lima"
             )
-            if toque_mecha and not toque_close:
+            if toco_mecha and not toco_close:
                 msg += f"\n📏 {mecha_info}"
 
             enviar_telegram(msg)
 
             item["estado"] = "tocado"
-            item["avisado"] = True
             item["tocado_en"] = ahora.isoformat()
             item["precio_en_toque"] = precio
-            item["tipo_toque"] = "exacto"
             tocados += 1
             continue
 
-        # ===== [FIX 3B] Aproximación confirmada =====
-        aprox, pico, dist_aprox = aproximacion_confirmada(symbol, nivel, direccion)
-        if aprox:
-            print(f"🟡 {symbol}: APROXIMACIÓN — pico=${pico:.6f} ({dist_aprox:.2f}% antes del nivel)", flush=True)
+        # ===== POR TOCAR =====
+        if (dist_abs <= CERCA_PCT
+            and distancia_emision > CERCA_PCT
+            and not item.get("aviso_por_tocar")):
+            print(f"🟡 {symbol}: POR TOCAR — {dist_abs:.2f}% del nivel", flush=True)
 
             emoji = "🟢" if direccion == "LONG" else "🔴"
             accion = "COMPRA" if direccion == "LONG" else "VENDE"
 
             msg = (
-                f"{emoji} {accion} {symbol}\n"
-                f"📈 Precio actual: ${precio:.6f}\n"
-                f"📐 Nivel objetivo: ${nivel:.6f}\n"
-                f"⚠️ Se acercó a ${pico:.6f} y retrocedió\n"
+                f"{emoji} {accion} {symbol} ⚠️ POR TOCAR\n"
+                f"📈 Precio: ${precio:.6f}\n"
+                f"📐 Nivel: ${nivel:.6f} ({tf})\n"
+                f"🎯 Score: {score:.1f} | {touch}T\n"
+                f"📊 Distancia: {dist_abs:.2f}%\n"
+                f"💡 Prepara entrada\n"
                 f"🕐 {hora_lima_dt.strftime('%H:%M')} Lima"
             )
             enviar_telegram(msg)
 
-            item["estado"] = "tocado"
-            item["avisado"] = True
-            item["tocado_en"] = ahora.isoformat()
-            item["precio_en_toque"] = precio
-            item["tipo_toque"] = "aproximacion"
-            item["pico_alcanzado"] = pico
-            tocados += 1
+            item["aviso_por_tocar"] = True
+            item["aviso_por_tocar_en"] = ahora.isoformat()
+            por_tocar += 1
             continue
 
-        # ===== Alejamiento =====
-        if abs(distancia_pct) > EXPIRACION_PCT:
+        # ===== ALEJAMIENTO =====
+        if dist_abs > EXPIRACION_PCT:
             item["estado"] = "expirado"
-            item["expirado_motivo"] = f"precio alejado {distancia_pct:+.2f}%"
+            item["expirado_motivo"] = f"alejado {distancia_pct:+.2f}%"
             expirados += 1
             print(f"⏰ {symbol}: expirado por alejamiento", flush=True)
             continue
@@ -284,7 +236,7 @@ def main():
     guardar_json(PENDING_FILE, levels)
 
     print("=" * 70, flush=True)
-    print(f"📊 RESULTADO: {esperando} activos | {tocados} tocados | {expirados} expirados", flush=True)
+    print(f"📊 RESULTADO: {esperando} activos | {tocados} tocados | {por_tocar} por tocar | {expirados} expirados", flush=True)
     print("🏁 WATCHER TERMINADO", flush=True)
 
 
