@@ -15,21 +15,26 @@ from pathlib import Path
 # Solo:
 #   1. Lee data/pending_levels.json (lo que multi.py publicó)
 #   2. Lee el precio del cache del recolector
-#   3. Compara y avisa por Telegram:
+#   3. Lee data/supertrend_state.json (solo para mostrar en el aviso)
+#   4. Compara y avisa por Telegram:
 #      - POR TOCAR: precio se acercó (≤0.5%)
 #      - TOCÓ: precio llegó (≤0.15% o mecha)
-#   4. Expira si se aleja >1.5% (respecto a la distancia de emisión)
-#      o pasa 24h
+#   5. Expira si se aleja >1.5% o pasa 24h
 # ============================================================
 
 DATA_DIR = Path("data")
 CACHE_DIR = DATA_DIR / "cache"
 PENDING_FILE = DATA_DIR / "pending_levels.json"
 
-TOQUE_PCT = 0.15              # para "tocó"
-CERCA_PCT = 0.50              # para "por tocar"
-EXPIRACION_PCT = 1.5          # alejamiento que expira
-MAX_HORAS_VIGENCIA = 24       # vida máxima del nivel
+SUPERTREND_URL = (
+    "https://raw.githubusercontent.com/Interpage188/"
+    "interpage/main/data/supertrend_state.json"
+)
+
+TOQUE_PCT = 0.15
+CERCA_PCT = 0.50
+EXPIRACION_PCT = 1.5
+MAX_HORAS_VIGENCIA = 24
 
 LIMA_OFFSET_HORAS = -5
 
@@ -54,10 +59,6 @@ def guardar_json(path, data):
 
 
 def precio_del_cache(symbol):
-    """
-    Lee del cache del recolector. Devuelve (price, high15, low15).
-    Es solo lectura de números. No es análisis.
-    """
     p = CACHE_DIR / f"{symbol}.json"
     data = leer_json(p)
     if not data:
@@ -71,6 +72,17 @@ def precio_del_cache(symbol):
         ultimo.get("high15"),
         ultimo.get("low15"),
     )
+
+
+def leer_supertrend():
+    """Lee supertrend_state.json del repo público. Devuelve dict symbols o {}."""
+    try:
+        req = urllib.request.Request(SUPERTREND_URL, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        return data.get("symbols", {})
+    except Exception:
+        return {}
 
 
 def enviar_telegram(msg):
@@ -112,6 +124,11 @@ def main():
 
     print(f"📋 {len(levels)} niveles pendientes", flush=True)
 
+    # [SUPERTREND] Leer una sola vez por ciclo (si hay algo que avisar)
+    st_symbols = leer_supertrend()
+    st_btc = st_symbols.get("BTC", {}).get("trend", "N/A")
+    st_btc_str = st_btc.upper() if st_btc not in ("N/A", None) else "N/A"
+
     tocados = 0
     por_tocar = 0
     expirados = 0
@@ -133,7 +150,6 @@ def main():
         tf = item.get("timeframe", "?")
         distancia_emision = item.get("distancia_emision", 0)
 
-        # Antigüedad
         emitido = item.get("emitido_en")
         if emitido:
             try:
@@ -159,10 +175,8 @@ def main():
         distancia_pct = ((precio - nivel) / nivel) * 100
         dist_abs = abs(distancia_pct)
 
-        # ===== TOCÓ (close) =====
         toco_close = dist_abs <= TOQUE_PCT
 
-        # ===== TOCÓ (mecha) =====
         toco_mecha = False
         mecha_info = ""
         if direccion == "SHORT" and high15 is not None and high15 >= nivel:
@@ -172,6 +186,10 @@ def main():
             toco_mecha = True
             mecha_info = f"low=${low15:.6f}"
 
+        # [SUPERTREND] Snapshot del ST actual para este símbolo
+        st_sym = st_symbols.get(symbol, {}).get("trend", "N/A")
+        st_sym_str = st_sym.upper() if st_sym not in ("N/A", None) else "N/A"
+
         if toco_close or toco_mecha:
             motivo = "Nivel alcanzado" if toco_close else "Mecha tocó el nivel"
             print(f"🎯 {symbol}: TOCÓ — {motivo}", flush=True)
@@ -179,16 +197,13 @@ def main():
             emoji = "🟢" if direccion == "LONG" else "🔴"
             accion = "COMPRA" if direccion == "LONG" else "VENDE"
 
-            # [SUPERTREND] Leer del item publicado (no consulta externa)
-            st = item.get("super_trend", "N/A")
-            st_str = st if st not in (None, "") else "N/A"
-
             msg = (
                 f"{emoji} {accion} {symbol}\n"
                 f"📈 Precio: ${precio:.6f}\n"
                 f"📐 Nivel: ${nivel:.6f} ({tf})\n"
                 f"🎯 Score: {score:.1f} | {touch}T\n"
-                f"🔮 SuperTrend: {st_str}\n"
+                f"🔮 SuperTrend {symbol}: {st_sym_str}\n"
+                f"🌐 SuperTrend BTC: {st_btc_str}\n"
                 f"✅ {motivo}\n"
                 f"🕐 {hora_lima_dt.strftime('%H:%M')} Lima"
             )
@@ -203,7 +218,6 @@ def main():
             tocados += 1
             continue
 
-        # ===== POR TOCAR =====
         if (dist_abs <= CERCA_PCT
             and distancia_emision > CERCA_PCT
             and not item.get("aviso_por_tocar")):
@@ -212,16 +226,13 @@ def main():
             emoji = "🟢" if direccion == "LONG" else "🔴"
             accion = "COMPRA" if direccion == "LONG" else "VENDE"
 
-            # [SUPERTREND] Leer del item publicado (no consulta externa)
-            st = item.get("super_trend", "N/A")
-            st_str = st if st not in (None, "") else "N/A"
-
             msg = (
                 f"{emoji} {accion} {symbol} ⚠️ POR TOCAR\n"
                 f"📈 Precio: ${precio:.6f}\n"
                 f"📐 Nivel: ${nivel:.6f} ({tf})\n"
                 f"🎯 Score: {score:.1f} | {touch}T\n"
-                f"🔮 SuperTrend: {st_str}\n"
+                f"🔮 SuperTrend {symbol}: {st_sym_str}\n"
+                f"🌐 SuperTrend BTC: {st_btc_str}\n"
                 f"📊 Distancia: {dist_abs:.2f}%\n"
                 f"💡 Prepara entrada\n"
                 f"🕐 {hora_lima_dt.strftime('%H:%M')} Lima"
@@ -233,11 +244,6 @@ def main():
             por_tocar += 1
             continue
 
-        # ===== ALEJAMIENTO =====
-        # Solo expira si el nivel estaba dentro de rango al emitirse
-        # (≤ EXPIRACION_PCT) y ahora se alejó más allá.
-        # Niveles emitidos ya lejos (>EXPIRACION_PCT) siguen vivos
-        # hasta acercarse o expirar por tiempo.
         if dist_abs > EXPIRACION_PCT and distancia_emision <= EXPIRACION_PCT:
             item["estado"] = "expirado"
             item["expirado_motivo"] = f"alejado {distancia_pct:+.2f}%"
