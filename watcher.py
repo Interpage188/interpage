@@ -124,10 +124,8 @@ def main():
 
     print(f"📋 {len(levels)} niveles pendientes", flush=True)
 
-    # [SUPERTREND] Leer una sola vez por ciclo (si hay algo que avisar)
+    # [SUPERTREND] Leer una sola vez por ciclo
     st_symbols = leer_supertrend()
-    st_btc = st_symbols.get("BTC", {}).get("trend", "N/A")
-    st_btc_str = st_btc.upper() if st_btc not in ("N/A", None) else "N/A"
 
     tocados = 0
     por_tocar = 0
@@ -202,8 +200,7 @@ def main():
                 f"📈 Precio: ${precio:.6f}\n"
                 f"📐 Nivel: ${nivel:.6f} ({tf})\n"
                 f"🎯 Score: {score:.1f} | {touch}T\n"
-                f"🔮 SuperTrend {symbol}: {st_sym_str}\n"
-                f"🌐 SuperTrend BTC: {st_btc_str}\n"
+                f"🔮 SuperTrend: {st_sym_str}\n"
                 f"✅ {motivo}\n"
                 f"🕐 {hora_lima_dt.strftime('%H:%M')} Lima"
             )
@@ -231,8 +228,7 @@ def main():
                 f"📈 Precio: ${precio:.6f}\n"
                 f"📐 Nivel: ${nivel:.6f} ({tf})\n"
                 f"🎯 Score: {score:.1f} | {touch}T\n"
-                f"🔮 SuperTrend {symbol}: {st_sym_str}\n"
-                f"🌐 SuperTrend BTC: {st_btc_str}\n"
+                f"🔮 SuperTrend: {st_sym_str}\n"
                 f"📊 Distancia: {dist_abs:.2f}%\n"
                 f"💡 Prepara entrada\n"
                 f"🕐 {hora_lima_dt.strftime('%H:%M')} Lima"
