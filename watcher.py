@@ -11,6 +11,11 @@ from pathlib import Path
 # ============================================================
 # WATCHER — vigila niveles pendientes y avisa al toque
 # Corre junto al recolector cada 5 min
+#
+# [TANDA 2 / FIX 2B]
+#   Ahora detecta tanto toques por cierre (close) como por mecha (high/low).
+#   - Para SHORT: si high15 >= nivel → aviso aunque el close no lo haya tocado
+#   - Para LONG:  si low15  <= nivel → aviso aunque el close no lo haya tocado
 # ============================================================
 
 DATA_DIR = Path("data")
@@ -44,14 +49,23 @@ def guardar_json(path, data):
 
 
 def precio_actual(symbol):
+    """
+    Devuelve (precio_close, high15, low15) del último sample.
+    Compatible con samples viejos (sin high15/low15): devuelve None en esos campos.
+    """
     p = CACHE_DIR / f"{symbol}.json"
     data = leer_json(p)
     if not data:
-        return None
+        return None, None, None
     pulso = data.get("pulso", [])
     if not pulso:
-        return None
-    return pulso[-1].get("price")
+        return None, None, None
+    ultimo = pulso[-1]
+    return (
+        ultimo.get("price"),
+        ultimo.get("high15"),
+        ultimo.get("low15"),
+    )
 
 
 def enviar_telegram(msg):
@@ -132,25 +146,41 @@ def main():
             except Exception:
                 pass
 
-        precio = precio_actual(symbol)
+        precio, high15, low15 = precio_actual(symbol)
         if precio is None:
             print(f"⚠️ {symbol}: sin precio en cache", flush=True)
             esperando += 1
             continue
 
+        # Distancia por close
         distancia_pct = ((precio - nivel) / nivel) * 100
 
-        # Toque detectado
-        if abs(distancia_pct) <= TOQUE_PCT:
-            print(f"🎯 {symbol}: TOQUE — nivel=${nivel:.6f} precio=${precio:.6f} ({distancia_pct:+.2f}%)", flush=True)
+        # [FIX 2B] Detectar mecha: si high tocó (SHORT) o low tocó (LONG)
+        mecha_tocada = False
+        mecha_info = ""
+        if direccion == "SHORT" and high15 is not None and high15 >= nivel:
+            mecha_tocada = True
+            mecha_info = f"high=${high15:.6f}"
+        elif direccion == "LONG" and low15 is not None and low15 <= nivel:
+            mecha_tocada = True
+            mecha_info = f"low=${low15:.6f}"
+
+        # Avisar si el close está cerca O si la mecha tocó
+        if abs(distancia_pct) <= TOQUE_PCT or mecha_tocada:
+            motivo = "CLOSE" if abs(distancia_pct) <= TOQUE_PCT else "MECHA"
+            print(f"🎯 {symbol}: TOQUE ({motivo}) — nivel=${nivel:.6f} precio=${precio:.6f} {mecha_info} ({distancia_pct:+.2f}%)", flush=True)
 
             emoji = "🟢" if direccion == "LONG" else "🔴"
             msg = (
-                f"🎯 TOQUE DETECTADO\n"
+                f"🎯 TOQUE DETECTADO ({motivo})\n"
                 f"{emoji} {direccion} {symbol}\n"
                 f"📈 Precio: ${precio:.6f}\n"
                 f"📐 Nivel: ${nivel:.6f}\n"
-                f"📊 Distancia: {distancia_pct:+.3f}%\n"
+                f"📊 Distancia close: {distancia_pct:+.3f}%\n"
+            )
+            if mecha_tocada and not abs(distancia_pct) <= TOQUE_PCT:
+                msg += f"📏 {mecha_info}\n"
+            msg += (
                 f"🎯 Score original: {item.get('score', 0):.1f}\n"
                 f"• Timeframe: {item.get('timeframe', '?')}\n"
                 f"• Toques: {item.get('touchCount', 0)}\n"
@@ -164,6 +194,8 @@ def main():
             item["avisado"] = True
             item["tocado_en"] = ahora.isoformat()
             item["precio_en_toque"] = precio
+            if mecha_tocada:
+                item["mecha_en_toque"] = mecha_info
             tocados += 1
             continue
 
