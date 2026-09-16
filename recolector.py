@@ -8,14 +8,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 # ============================================================
-# RECOLECTOR — Fase 1.5
-#   9 monedas representativas
+# RECOLECTOR — Fase 1.6
+#   17 monedas
 #   3 niveles de frecuencia según RSI 15m:
 #     - extremo      (RSI <30 o >70):  cada 5 min
 #     - recuperación (RSI 30-40, 60-70): cada 10 min
 #     - normal       (RSI 40-60):      cada 30 min
 #   Fuente: OKX (velas OHLC reales, sin coste)
-#   Retención: 24h de pulso
+#   Retención: 12h de pulso
+#
+#   [TANDA 1] Añadido al pulso:
+#     - high15, low15: máximo/mínimo de la vela 15m (para detectar mechas)
+#     - vol15, vol_usdt15: volumen de la vela en contratos y USDT
+#     - rvol15: ratio vs promedio 20 velas (volumen relativo)
+#     - dir4h: dirección 4h (para RSI escalonado)
 # ============================================================
 
 SYMBOLS = [
@@ -47,7 +53,7 @@ RSI_EXTREMO_ALTO = 70
 RSI_RECUP_BAJO   = 40
 RSI_RECUP_ALTO   = 60
 
-RETENCION_PULSO_H = 24
+RETENCION_PULSO_H = 12
 OKX_LIMIT_VELAS = 100
 
 DATA_DIR = Path("data")
@@ -202,14 +208,40 @@ def actualizar_pulso(symbol, ahora):
             return "?"
         return "up" if velas[-1]["c"] > velas[-2]["c"] else "down"
 
+    # [TANDA 1] Datos de la última vela 15m
+    ultima_vela = velas_15m[-1]
+    high_15m = ultima_vela.get("h")
+    low_15m = ultima_vela.get("l")
+    vol_contratos = ultima_vela.get("v")
+
+    vol_usdt = None
+    if vol_contratos is not None and price:
+        vol_usdt = vol_contratos * price
+
+    rvol = 1.0
+    if len(velas_15m) >= 21 and vol_contratos:
+        vols_previos = [v["v"] for v in velas_15m[-21:-1] if v.get("v")]
+        if vols_previos:
+            vol_promedio = sum(vols_previos) / len(vols_previos)
+            if vol_promedio > 0:
+                rvol = vol_contratos / vol_promedio
+
     sample = {
-        "ts":     int(ahora.timestamp()),
-        "price":  round(price, 8),
-        "rsi15":  round(rsi15, 2) if rsi15 is not None else None,
-        "rsi1h":  round(rsi1h, 2) if rsi1h is not None else None,
-        "rsi4h":  round(rsi4h, 2) if rsi4h is not None else None,
-        "dir15":  direccion(velas_15m),
-        "dir1h":  direccion(velas_1h) if velas_1h else "?",
+        "ts":         int(ahora.timestamp()),
+        "price":      round(price, 8),
+        # [TANDA 1] Campos nuevos
+        "high15":     round(high_15m, 8) if high_15m is not None else None,
+        "low15":      round(low_15m, 8) if low_15m is not None else None,
+        "vol15":      round(vol_contratos, 4) if vol_contratos is not None else None,
+        "vol_usdt15": round(vol_usdt, 2) if vol_usdt is not None else None,
+        "rvol15":     round(rvol, 2),
+        "dir4h":      direccion(velas_4h) if velas_4h else "?",
+        # Existentes
+        "rsi15":      round(rsi15, 2) if rsi15 is not None else None,
+        "rsi1h":      round(rsi1h, 2) if rsi1h is not None else None,
+        "rsi4h":      round(rsi4h, 2) if rsi4h is not None else None,
+        "dir15":      direccion(velas_15m),
+        "dir1h":      direccion(velas_1h) if velas_1h else "?",
     }
 
     cache = cargar_cache(symbol)
@@ -245,6 +277,7 @@ def actualizar_pulso(symbol, ahora):
         f"   {icono_zona} {symbol} [{zona}]: ${price:.6f} | "
         f"RSI15={rsi15_str} {sample['dir15']} | "
         f"RSI1h={rsi1h_str} | RSI4h={rsi4h_str} | "
+        f"RVOL={sample['rvol15']:.2f} | "
         f"pulso={len(pulso)}",
         flush=True
     )
@@ -256,12 +289,13 @@ def main():
     ahora_ts = ahora.timestamp()
 
     print("\n" + "=" * 70, flush=True)
-    print("📦 RECOLECTOR — Fase 1.5 (3 niveles)", flush=True)
-    print(f"   {len(SYMBOLS)} monedas representativas", flush=True)
+    print("📦 RECOLECTOR — Fase 1.6 (volumen + high/low)", flush=True)
+    print(f"   {len(SYMBOLS)} monedas", flush=True)
     print(f"   Extremo       (RSI<{RSI_EXTREMO_BAJO} o >{RSI_EXTREMO_ALTO}):   cada {FREC_EXTREMO_MIN} min", flush=True)
     print(f"   Recuperación  (RSI<{RSI_RECUP_BAJO} o >{RSI_RECUP_ALTO}):    cada {FREC_RECUPERACION_MIN} min", flush=True)
     print(f"   Normal        (RSI {RSI_RECUP_BAJO}-{RSI_RECUP_ALTO}):        cada {FREC_NORMAL_MIN} min", flush=True)
     print(f"   Retención pulso: {RETENCION_PULSO_H}h", flush=True)
+    print(f"   Nuevos campos: high15, low15, vol15, vol_usdt15, rvol15, dir4h", flush=True)
     print("=" * 70, flush=True)
     print(f"\nHora UTC: {ahora.isoformat()}", flush=True)
 
