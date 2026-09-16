@@ -212,11 +212,16 @@ def main():
             emoji = "🟢" if direccion == "LONG" else "🔴"
             accion = "COMPRA" if direccion == "LONG" else "VENDE"
 
+            # [SUPERTREND] Leer del item publicado (no consulta externa)
+            st = item.get("super_trend", "N/A")
+            st_str = st if st not in (None, "") else "N/A"
+
             msg = (
                 f"{emoji} {accion} {symbol} ⚠️ POR TOCAR\n"
                 f"📈 Precio: ${precio:.6f}\n"
                 f"📐 Nivel: ${nivel:.6f} ({tf})\n"
                 f"🎯 Score: {score:.1f} | {touch}T\n"
+                f"🔮 SuperTrend: {st_str}\n"
                 f"📊 Distancia: {dist_abs:.2f}%\n"
                 f"💡 Prepara entrada\n"
                 f"🕐 {hora_lima_dt.strftime('%H:%M')} Lima"
