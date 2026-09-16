@@ -8,20 +8,22 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 # ============================================================
-# RECOLECTOR — Fase 1.6
+# RECOLECTOR — Fase 1.7
 #   17 monedas
-#   3 niveles de frecuencia según RSI 15m:
-#     - extremo      (RSI <30 o >70):  cada 5 min
-#     - recuperación (RSI 30-40, 60-70): cada 10 min
-#     - normal       (RSI 40-60):      cada 30 min
+#   Frecuencia: cada 5 min (todas, sin adaptación)
 #   Fuente: OKX (velas OHLC reales, sin coste)
 #   Retención: 12h de pulso
 #
-#   [TANDA 1] Añadido al pulso:
+#   [TANDA 1] Campos en el pulso:
 #     - high15, low15: máximo/mínimo de la vela 15m (para detectar mechas)
 #     - vol15, vol_usdt15: volumen de la vela en contratos y USDT
 #     - rvol15: ratio vs promedio 20 velas (volumen relativo)
 #     - dir4h: dirección 4h (para RSI escalonado)
+#
+#   [FASE 1.7] Eliminada la cadencia adaptativa (5/10/30 min).
+#     Razón: el watcher necesita precio fresco cada 5 min para
+#     detectar toques reales. La cadencia de 30 min generaba
+#     avisos con datos viejos (falsos positivos).
 # ============================================================
 
 SYMBOLS = [
@@ -44,10 +46,7 @@ SYMBOLS = [
     "DASH",
 ]
 
-FREC_EXTREMO_MIN      = 5
-FREC_RECUPERACION_MIN = 10
-FREC_NORMAL_MIN       = 30
-
+# Zona RSI (solo informativa, ya no decide frecuencia)
 RSI_EXTREMO_BAJO = 30
 RSI_EXTREMO_ALTO = 70
 RSI_RECUP_BAJO   = 40
@@ -130,6 +129,7 @@ def calcular_rsi(prices, period=14):
 
 
 def zona_rsi(rsi15):
+    """Solo para etiquetar la muestra en logs. No decide frecuencia."""
     if rsi15 is None:
         return "desconocida"
     if rsi15 < RSI_EXTREMO_BAJO or rsi15 > RSI_EXTREMO_ALTO:
@@ -137,14 +137,6 @@ def zona_rsi(rsi15):
     if rsi15 < RSI_RECUP_BAJO or rsi15 > RSI_RECUP_ALTO:
         return "recuperacion"
     return "normal"
-
-
-def frecuencia_para_zona(zona):
-    if zona == "extremo":
-        return FREC_EXTREMO_MIN
-    if zona == "recuperacion":
-        return FREC_RECUPERACION_MIN
-    return FREC_NORMAL_MIN
 
 
 def cache_path(symbol):
@@ -171,23 +163,6 @@ def guardar_cache(symbol, data):
         json.dump(data, f, indent=2)
 
 
-def minutos_desde_ultima_muestra(cache, ahora_ts):
-    pulso = cache.get("pulso", [])
-    if not pulso:
-        return 9999
-    ultimo_ts = pulso[-1].get("ts")
-    if not ultimo_ts:
-        return 9999
-    return (ahora_ts - ultimo_ts) / 60
-
-
-def rsi_actual_del_cache(cache):
-    pulso = cache.get("pulso", [])
-    if not pulso:
-        return None
-    return pulso[-1].get("rsi15")
-
-
 def actualizar_pulso(symbol, ahora):
     velas_15m = fetch_okx_klines(symbol, "15m", OKX_LIMIT_VELAS)
     velas_1h  = fetch_okx_klines(symbol, "1h",  OKX_LIMIT_VELAS)
@@ -208,7 +183,6 @@ def actualizar_pulso(symbol, ahora):
             return "?"
         return "up" if velas[-1]["c"] > velas[-2]["c"] else "down"
 
-    # [TANDA 1] Datos de la última vela 15m
     ultima_vela = velas_15m[-1]
     high_15m = ultima_vela.get("h")
     low_15m = ultima_vela.get("l")
@@ -229,14 +203,12 @@ def actualizar_pulso(symbol, ahora):
     sample = {
         "ts":         int(ahora.timestamp()),
         "price":      round(price, 8),
-        # [TANDA 1] Campos nuevos
         "high15":     round(high_15m, 8) if high_15m is not None else None,
         "low15":      round(low_15m, 8) if low_15m is not None else None,
         "vol15":      round(vol_contratos, 4) if vol_contratos is not None else None,
         "vol_usdt15": round(vol_usdt, 2) if vol_usdt is not None else None,
         "rvol15":     round(rvol, 2),
         "dir4h":      direccion(velas_4h) if velas_4h else "?",
-        # Existentes
         "rsi15":      round(rsi15, 2) if rsi15 is not None else None,
         "rsi1h":      round(rsi1h, 2) if rsi1h is not None else None,
         "rsi4h":      round(rsi4h, 2) if rsi4h is not None else None,
@@ -289,37 +261,18 @@ def main():
     ahora_ts = ahora.timestamp()
 
     print("\n" + "=" * 70, flush=True)
-    print("📦 RECOLECTOR — Fase 1.6 (volumen + high/low)", flush=True)
+    print("📦 RECOLECTOR — Fase 1.7 (siempre cada 5 min)", flush=True)
     print(f"   {len(SYMBOLS)} monedas", flush=True)
-    print(f"   Extremo       (RSI<{RSI_EXTREMO_BAJO} o >{RSI_EXTREMO_ALTO}):   cada {FREC_EXTREMO_MIN} min", flush=True)
-    print(f"   Recuperación  (RSI<{RSI_RECUP_BAJO} o >{RSI_RECUP_ALTO}):    cada {FREC_RECUPERACION_MIN} min", flush=True)
-    print(f"   Normal        (RSI {RSI_RECUP_BAJO}-{RSI_RECUP_ALTO}):        cada {FREC_NORMAL_MIN} min", flush=True)
+    print(f"   Frecuencia: cada 5 min (todas)", flush=True)
     print(f"   Retención pulso: {RETENCION_PULSO_H}h", flush=True)
-    print(f"   Nuevos campos: high15, low15, vol15, vol_usdt15, rvol15, dir4h", flush=True)
+    print(f"   Campos: high15, low15, vol15, vol_usdt15, rvol15, dir4h", flush=True)
     print("=" * 70, flush=True)
     print(f"\nHora UTC: {ahora.isoformat()}", flush=True)
 
     guardados = 0
-    skipped = 0
     fallidos = 0
 
     for symbol in SYMBOLS:
-        cache = cargar_cache(symbol)
-        rsi15_previo = rsi_actual_del_cache(cache)
-        zona = zona_rsi(rsi15_previo)
-        intervalo = frecuencia_para_zona(zona)
-        minutos = minutos_desde_ultima_muestra(cache, ahora_ts)
-
-        if minutos < intervalo:
-            print(
-                f"⏭️ {symbol} [{zona}]: hace {minutos:.0f} min, "
-                f"toca cada {intervalo} → skip",
-                flush=True
-            )
-            skipped += 1
-            continue
-
-        print(f"\n🔄 {symbol} [{zona}]: hace {minutos:.0f} min → actualizando", flush=True)
         ok = actualizar_pulso(symbol, ahora)
         if ok:
             guardados += 1
@@ -330,7 +283,6 @@ def main():
     print("📢 RESULTADO", flush=True)
     print("=" * 70, flush=True)
     print(f"Guardados:  {guardados}", flush=True)
-    print(f"Skip:       {skipped}", flush=True)
     print(f"Fallidos:   {fallidos}", flush=True)
     print(f"\n💾 Cache dir: {CACHE_DIR}", flush=True)
     print("🏁 PROGRAMA TERMINADO", flush=True)
