@@ -1,0 +1,30 @@
+name: SUPERTREND
+
+on:
+  schedule:
+    - cron: "3,18,33,48 * * * *"     # cada 15 min, desfasado del recolector (:2/:7/:12/...)
+  workflow_dispatch:
+
+jobs:
+  supertrend:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Ejecutar supertrend
+        run: python supertrend.py
+
+      - name: Commit state
+        run: |
+          git config user.name "supertrend-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git pull --rebase origin main || true
+          git add data/supertrend_state.json
+          git diff --staged --quiet || git commit -m "supertrend: update state [skip ci]"
+          git push
