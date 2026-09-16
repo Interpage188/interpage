@@ -18,7 +18,8 @@ from pathlib import Path
 #   3. Compara y avisa por Telegram:
 #      - POR TOCAR: precio se acercó (≤0.5%)
 #      - TOCÓ: precio llegó (≤0.15% o mecha)
-#   4. Expira si se aleja >1.5% o pasa 24h
+#   4. Expira si se aleja >1.5% (respecto a la distancia de emisión)
+#      o pasa 24h
 # ============================================================
 
 DATA_DIR = Path("data")
@@ -223,7 +224,11 @@ def main():
             continue
 
         # ===== ALEJAMIENTO =====
-        if dist_abs > EXPIRACION_PCT:
+        # Solo expira si el nivel estaba dentro de rango al emitirse
+        # (≤ EXPIRACION_PCT) y ahora se alejó más allá.
+        # Niveles emitidos ya lejos (>EXPIRACION_PCT) siguen vivos
+        # hasta acercarse o expirar por tiempo.
+        if dist_abs > EXPIRACION_PCT and distancia_emision <= EXPIRACION_PCT:
             item["estado"] = "expirado"
             item["expirado_motivo"] = f"alejado {distancia_pct:+.2f}%"
             expirados += 1
