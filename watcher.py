@@ -11,25 +11,19 @@ from pathlib import Path
 # ============================================================
 # WATCHER — solo alarma de lo que multi.py publicó
 #
-# No analiza. No consulta OKX. No decide nada.
+# No analiza. No consulta OKX. No consulta SuperTrend.
 # Solo:
 #   1. Lee data/pending_levels.json (lo que multi.py publicó)
 #   2. Lee el precio del cache del recolector
-#   3. Lee data/supertrend_state.json (solo para mostrar en el aviso)
-#   4. Compara y avisa por Telegram:
+#   3. Compara y avisa por Telegram:
 #      - POR TOCAR: precio se acercó (≤0.5%)
 #      - TOCÓ: precio llegó (≤0.15% o mecha)
-#   5. Expira si se aleja >1.5% o pasa 24h
+#   4. Expira si se aleja >1.5% o pasa 24h
 # ============================================================
 
 DATA_DIR = Path("data")
 CACHE_DIR = DATA_DIR / "cache"
 PENDING_FILE = DATA_DIR / "pending_levels.json"
-
-SUPERTREND_URL = (
-    "https://raw.githubusercontent.com/Interpage188/"
-    "interpage/main/data/supertrend_state.json"
-)
 
 TOQUE_PCT = 0.15
 CERCA_PCT = 0.50
@@ -74,17 +68,6 @@ def precio_del_cache(symbol):
     )
 
 
-def leer_supertrend():
-    """Lee supertrend_state.json del repo público. Devuelve dict symbols o {}."""
-    try:
-        req = urllib.request.Request(SUPERTREND_URL, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=10) as r:
-            data = json.loads(r.read().decode("utf-8"))
-        return data.get("symbols", {})
-    except Exception:
-        return {}
-
-
 def enviar_telegram(msg):
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
@@ -124,9 +107,6 @@ def main():
 
     print(f"📋 {len(levels)} niveles pendientes", flush=True)
 
-    # [SUPERTREND] Leer una sola vez por ciclo
-    st_symbols = leer_supertrend()
-
     tocados = 0
     por_tocar = 0
     expirados = 0
@@ -147,6 +127,9 @@ def main():
         touch = item.get("touchCount", 0)
         tf = item.get("timeframe", "?")
         distancia_emision = item.get("distancia_emision", 0)
+
+        # [SUPERTREND] Leer del propio item (multi.py lo publicó)
+        st_sym_str = item.get("super_trend", "N/A")
 
         emitido = item.get("emitido_en")
         if emitido:
@@ -183,10 +166,6 @@ def main():
         elif direccion == "LONG" and low15 is not None and low15 <= nivel:
             toco_mecha = True
             mecha_info = f"low=${low15:.6f}"
-
-        # [SUPERTREND] Snapshot del ST actual para este símbolo
-        st_sym = st_symbols.get(symbol, {}).get("trend", "N/A")
-        st_sym_str = st_sym.upper() if st_sym not in ("N/A", None) else "N/A"
 
         if toco_close or toco_mecha:
             motivo = "Nivel alcanzado" if toco_close else "Mecha tocó el nivel"
