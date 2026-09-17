@@ -91,7 +91,8 @@ jobs:
             echo "📭 No hay cambios que guardar."
           else
             git commit -m "CoinBeacon PV: update [skip ci]"
-            git push
+            git pull --rebase origin main || true
+            git push || echo "⚠️ Push falló (race condition), se reintentará en el próximo ciclo"
           fi
 
       - name: Subir artifacts
