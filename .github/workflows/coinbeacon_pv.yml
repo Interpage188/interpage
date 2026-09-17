@@ -1,0 +1,105 @@
+name: CoinBeacon PV (1d)
+
+on:
+  schedule:
+    # Cada 2 horas UTC (0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22)
+    # Lima (UTC-5): 7pm, 9pm, 11pm, 1am, 3am, 5am, 7am, 9am, 11am, 1pm, 3pm, 5pm
+    - cron: '0 */2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: coinbeacon-pv
+  cancel-in-progress: false
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repositorio
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      - name: Verificar script
+        run: |
+          if [ ! -f coinbeacon_pv.py ]; then
+            echo "❌ coinbeacon_pv.py no encontrado"
+            exit 1
+          fi
+          echo "✅ coinbeacon_pv.py encontrado"
+
+      - name: Check sintaxis Python
+        run: |
+          python -m py_compile coinbeacon_pv.py
+          echo "✅ Sintaxis OK"
+
+      - name: Ejecutar script
+        env:
+          COINBEACON_TOKEN: ${{ secrets.COINBEACON_TOKEN }}
+          COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python coinbeacon_pv.py
+
+      - name: Mostrar archivos generados
+        if: always()
+        run: |
+          echo "📁 Contenido de data/:"
+          ls -la data/ 2>/dev/null || echo "No hay carpeta data/"
+
+          echo ""
+          echo "📄 Últimas 5 filas de coinbeacon_pv.csv:"
+          if [ -f data/coinbeacon_pv.csv ]; then
+            tail -n 5 data/coinbeacon_pv.csv
+          else
+            echo "(no existe)"
+          fi
+
+          echo ""
+          echo "📄 Estado:"
+          if [ -f data/coinbeacon_pv_state.json ]; then
+            python -c "import json;d=json.load(open('data/coinbeacon_pv_state.json'));print(f'   {len(d)} entradas activas')"
+          else
+            echo "(no existe)"
+          fi
+
+      - name: Commit state y CSV
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if [ -f data/coinbeacon_pv.csv ]; then git add data/coinbeacon_pv.csv; fi
+          if [ -f data/coinbeacon_pv_state.json ]; then git add data/coinbeacon_pv_state.json; fi
+
+          if git diff --staged --quiet; then
+            echo "📭 No hay cambios que guardar."
+          else
+            git commit -m "CoinBeacon PV: update [skip ci]"
+            git push
+          fi
+
+      - name: Subir artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coinbeacon_pv_data
+          path: |
+            data/coinbeacon_pv.csv
+            data/coinbeacon_pv_state.json
+          retention-days: 7
