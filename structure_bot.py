@@ -3,6 +3,10 @@
 """
 STRUCTURE BOT — BOS / CHoCH
 Detecta cambios de estructura usando MACD sobre velas del cache del recolector.
+
+[FIX] Solo alerta eventos NUEVOS (últimas 3 velas desde última corrida).
+[FIX] Dedup: no repite el mismo nivel roto.
+[FIX] Filtro distancia máxima 5%.
 """
 
 import json
@@ -26,6 +30,8 @@ MACD_SLOW = 26
 MACD_SIGNAL = 9
 
 MIN_SWING_PCT = 0.15
+MAX_DISTANCIA_PCT = 5.0
+VENTANA_VELAS_NUEVAS = 3
 
 DATA_DIR = Path("data")
 DATA_DIR.mkdir(exist_ok=True)
@@ -77,9 +83,24 @@ def analizar_timeframe(velas, estado_tf):
     if not velas or len(velas) < 40:
         return None, estado_tf
 
+    ultimo_ts = estado_tf.get("ultimo_ts", 0)
+    velas_nuevas = [v for v in velas if v["ts"] > ultimo_ts]
+
+    if not velas_nuevas and ultimo_ts != 0:
+        return None, estado_tf
+
+    min_ts_valido = 0
+    if ultimo_ts == 0:
+        # Primera corrida: solo alertar si rompió en las últimas N velas
+        if len(velas) >= VENTANA_VELAS_NUEVAS:
+            min_ts_valido = velas[-VENTANA_VELAS_NUEVAS]["ts"]
+    else:
+        min_ts_valido = velas_nuevas[0]["ts"]
+
     cierres = [v["c"] for v in velas]
     highs = [v["h"] for v in velas]
     lows = [v["l"] for v in velas]
+    timestamps = [v["ts"] for v in velas]
 
     macd = calcular_macd(cierres)
     if len(macd) < 10:
@@ -87,6 +108,8 @@ def analizar_timeframe(velas, estado_tf):
 
     swing_high = estado_tf.get("swing_high")
     swing_low = estado_tf.get("swing_low")
+    swing_high_ts = estado_tf.get("swing_high_ts", 0)
+    swing_low_ts = estado_tf.get("swing_low_ts", 0)
     trend = estado_tf.get("trend", 0)
 
     for i in range(1, len(macd)):
@@ -97,54 +120,71 @@ def analizar_timeframe(velas, estado_tf):
             idx = i - 1
             if 0 <= idx < len(lows):
                 nuevo_low = lows[idx]
+                ts_low = timestamps[idx]
                 if swing_low is None or abs(nuevo_low - swing_low) / swing_low * 100 >= MIN_SWING_PCT:
                     swing_low = nuevo_low
+                    swing_low_ts = ts_low
 
         if m_prev >= 0 and m_now < 0:
             idx = i - 1
             if 0 <= idx < len(highs):
                 nuevo_high = highs[idx]
+                ts_high = timestamps[idx]
                 if swing_high is None or abs(nuevo_high - swing_high) / swing_high * 100 >= MIN_SWING_PCT:
                     swing_high = nuevo_high
+                    swing_high_ts = ts_high
 
     cierre_actual = cierres[-1]
+    ts_actual = timestamps[-1]
     evento = None
 
     if swing_high is not None and cierre_actual > swing_high:
-        if trend == 1:
-            tipo = "BOS ALCISTA"
-        else:
-            tipo = "CHoCH ALCISTA"
-        evento = {
-            "tipo": tipo,
-            "direccion": "up",
-            "nivel_roto": swing_high,
-            "precio": cierre_actual,
-            "distancia_pct": ((cierre_actual - swing_high) / swing_high) * 100,
-        }
-        trend = 1
-        swing_high = None
+        dist_pct = ((cierre_actual - swing_high) / swing_high) * 100
+        # Solo alertar si:
+        # 1. La ruptura ocurrió DESPUÉS de min_ts_valido
+        # 2. Distancia dentro del máximo
+        if ts_actual >= min_ts_valido and dist_pct <= MAX_DISTANCIA_PCT:
+            if trend == 1:
+                tipo = "BOS ALCISTA"
+            else:
+                tipo = "CHoCH ALCISTA"
+            evento = {
+                "tipo": tipo,
+                "direccion": "up",
+                "nivel_roto": swing_high,
+                "precio": cierre_actual,
+                "distancia_pct": dist_pct,
+            }
+            trend = 1
+            swing_high = None
+            swing_high_ts = 0
 
     elif swing_low is not None and cierre_actual < swing_low:
-        if trend == -1:
-            tipo = "BOS BAJISTA"
-        else:
-            tipo = "CHoCH BAJISTA"
-        evento = {
-            "tipo": tipo,
-            "direccion": "down",
-            "nivel_roto": swing_low,
-            "precio": cierre_actual,
-            "distancia_pct": ((swing_low - cierre_actual) / swing_low) * 100,
-        }
-        trend = -1
-        swing_low = None
+        dist_pct = ((swing_low - cierre_actual) / swing_low) * 100
+        if ts_actual >= min_ts_valido and dist_pct <= MAX_DISTANCIA_PCT:
+            if trend == -1:
+                tipo = "BOS BAJISTA"
+            else:
+                tipo = "CHoCH BAJISTA"
+            evento = {
+                "tipo": tipo,
+                "direccion": "down",
+                "nivel_roto": swing_low,
+                "precio": cierre_actual,
+                "distancia_pct": dist_pct,
+            }
+            trend = -1
+            swing_low = None
+            swing_low_ts = 0
 
     nuevo_estado = {
         "trend": trend,
         "swing_high": swing_high,
         "swing_low": swing_low,
+        "swing_high_ts": swing_high_ts,
+        "swing_low_ts": swing_low_ts,
         "ultimo_evento": evento["tipo"] if evento else estado_tf.get("ultimo_evento"),
+        "ultimo_ts": ts_actual,
         "actualizado": datetime.now(timezone.utc).isoformat(),
     }
     return evento, nuevo_estado
@@ -195,6 +235,7 @@ def main():
     print("\n" + "=" * 70, flush=True)
     print("🏗️  STRUCTURE BOT — BOS / CHoCH", flush=True)
     print(f"   {len(SYMBOLS)} monedas | TF: {', '.join(TIMEFRAMES)}", flush=True)
+    print(f"   Ventana: últimas {VENTANA_VELAS_NUEVAS} velas | Max dist: {MAX_DISTANCIA_PCT}%", flush=True)
     print("=" * 70, flush=True)
     print(f"\nHora UTC: {datetime.now(timezone.utc).isoformat()}", flush=True)
 
