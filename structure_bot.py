@@ -4,9 +4,10 @@
 STRUCTURE BOT — BOS / CHoCH
 Detecta cambios de estructura usando MACD sobre velas del cache del recolector.
 
-[FIX] Solo alerta eventos NUEVOS (últimas 3 velas desde última corrida).
-[FIX] Dedup: no repite el mismo nivel roto.
-[FIX] Filtro distancia máxima 5%.
+FIXES aplicados:
+- Solo alerta eventos NUEVOS (últimas 3 velas desde última corrida).
+- Dedup: no repite el mismo nivel roto (niveles_alertados).
+- Filtro distancia máxima 5%.
 """
 
 import json
@@ -32,6 +33,7 @@ MACD_SIGNAL = 9
 MIN_SWING_PCT = 0.15
 MAX_DISTANCIA_PCT = 5.0
 VENTANA_VELAS_NUEVAS = 3
+MAX_NIVELES_GUARDADOS = 20
 
 DATA_DIR = Path("data")
 DATA_DIR.mkdir(exist_ok=True)
@@ -79,6 +81,17 @@ def calcular_macd(cierres):
     return macd
 
 
+def ya_fue_alertado(nivel, niveles_alertados):
+    """Verifica si el nivel ya fue alertado (tolerancia 0.1%)."""
+    for n in niveles_alertados:
+        try:
+            if abs(nivel - n) / n * 100 < 0.1:
+                return True
+        except ZeroDivisionError:
+            continue
+    return False
+
+
 def analizar_timeframe(velas, estado_tf):
     if not velas or len(velas) < 40:
         return None, estado_tf
@@ -91,7 +104,6 @@ def analizar_timeframe(velas, estado_tf):
 
     min_ts_valido = 0
     if ultimo_ts == 0:
-        # Primera corrida: solo alertar si rompió en las últimas N velas
         if len(velas) >= VENTANA_VELAS_NUEVAS:
             min_ts_valido = velas[-VENTANA_VELAS_NUEVAS]["ts"]
     else:
@@ -111,6 +123,7 @@ def analizar_timeframe(velas, estado_tf):
     swing_high_ts = estado_tf.get("swing_high_ts", 0)
     swing_low_ts = estado_tf.get("swing_low_ts", 0)
     trend = estado_tf.get("trend", 0)
+    niveles_alertados = estado_tf.get("niveles_alertados", [])
 
     for i in range(1, len(macd)):
         m_prev = macd[i - 1]
@@ -140,10 +153,8 @@ def analizar_timeframe(velas, estado_tf):
 
     if swing_high is not None and cierre_actual > swing_high:
         dist_pct = ((cierre_actual - swing_high) / swing_high) * 100
-        # Solo alertar si:
-        # 1. La ruptura ocurrió DESPUÉS de min_ts_valido
-        # 2. Distancia dentro del máximo
-        if ts_actual >= min_ts_valido and dist_pct <= MAX_DISTANCIA_PCT:
+        ya_alertado = ya_fue_alertado(swing_high, niveles_alertados)
+        if not ya_alertado and ts_actual >= min_ts_valido and dist_pct <= MAX_DISTANCIA_PCT:
             if trend == 1:
                 tipo = "BOS ALCISTA"
             else:
@@ -156,12 +167,15 @@ def analizar_timeframe(velas, estado_tf):
                 "distancia_pct": dist_pct,
             }
             trend = 1
+            niveles_alertados.append(swing_high)
+            niveles_alertados = niveles_alertados[-MAX_NIVELES_GUARDADOS:]
             swing_high = None
             swing_high_ts = 0
 
     elif swing_low is not None and cierre_actual < swing_low:
         dist_pct = ((swing_low - cierre_actual) / swing_low) * 100
-        if ts_actual >= min_ts_valido and dist_pct <= MAX_DISTANCIA_PCT:
+        ya_alertado = ya_fue_alertado(swing_low, niveles_alertados)
+        if not ya_alertado and ts_actual >= min_ts_valido and dist_pct <= MAX_DISTANCIA_PCT:
             if trend == -1:
                 tipo = "BOS BAJISTA"
             else:
@@ -174,6 +188,8 @@ def analizar_timeframe(velas, estado_tf):
                 "distancia_pct": dist_pct,
             }
             trend = -1
+            niveles_alertados.append(swing_low)
+            niveles_alertados = niveles_alertados[-MAX_NIVELES_GUARDADOS:]
             swing_low = None
             swing_low_ts = 0
 
@@ -183,6 +199,7 @@ def analizar_timeframe(velas, estado_tf):
         "swing_low": swing_low,
         "swing_high_ts": swing_high_ts,
         "swing_low_ts": swing_low_ts,
+        "niveles_alertados": niveles_alertados,
         "ultimo_evento": evento["tipo"] if evento else estado_tf.get("ultimo_evento"),
         "ultimo_ts": ts_actual,
         "actualizado": datetime.now(timezone.utc).isoformat(),
