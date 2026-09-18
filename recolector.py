@@ -230,6 +230,8 @@ def actualizar_pulso(symbol, ahora):
     cache["symbol"] = symbol
     cache["updated_at"] = ahora.isoformat()
     cache["pulso"] = pulso
+    cache["velas_15m"] = velas_15m
+    cache["velas_1h"]  = velas_1h
 
     guardar_cache(symbol, cache)
 
