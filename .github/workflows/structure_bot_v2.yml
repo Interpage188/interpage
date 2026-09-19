@@ -1,60 +1,63 @@
-name: STRUCTURE BOT V2
-
-on:
-  workflow_dispatch:
-
-  schedule:
-    - cron: "*/5 * * * *"
+name: Structure Bot V2
 
 permissions:
   contents: write
+
+on:
+  schedule:
+    # Cada 5 minutos (coincide con el recolector)
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
 
 concurrency:
   group: structure-bot-v2
   cancel-in-progress: false
 
 jobs:
-  structure-v2:
-    name: Structure Bot V2
+  run:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Configurar Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.10'
 
-      - name: Ejecutar Structure Bot V2
+      - name: Verify script
+        run: |
+          if [ ! -f structure_bot_v2.py ]; then
+            echo "❌ structure_bot_v2.py no encontrado"
+            exit 1
+          fi
+          echo "✅ structure_bot_v2.py encontrado"
+
+      - name: Syntax check
+        run: |
+          python -m py_compile structure_bot_v2.py
+          echo "✅ Sintaxis OK"
+
+      - name: Run Structure Bot V2
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          python structure_bot_v2.py
+        run: python structure_bot_v2.py
 
-      - name: Guardar estado V2
+      - name: Commit state
+        if: always()
         run: |
           git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git add data/structure_v2_state.json
-
-          if git diff --cached --quiet; then
-            echo "Sin cambios en el estado V2."
-            exit 0
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if [ -f data/structure_v2_state.json ]; then
+            git add data/structure_v2_state.json
           fi
-
-          git commit -m "chore: update structure bot v2 state"
-
-          for i in 1 2 3; do
-            git pull --rebase origin main && git push && exit 0
-            echo "Push ocupado. Reintentando..."
-            sleep 5
-          done
-
-          echo "No se pudo actualizar el estado V2 después de varios intentos."
-          exit 1
+          if git diff --staged --quiet; then
+            echo "📭 Sin cambios"
+          else
+            git commit -m "Structure Bot V2: update [skip ci]"
+            git pull --rebase origin main || true
+            git push || echo "⚠️ Push falló"
+          fi
