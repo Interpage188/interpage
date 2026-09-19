@@ -62,6 +62,7 @@ CACHE_DIR.mkdir(exist_ok=True)
 
 
 OKX_INTERVALOS = {
+    "5m":  "5m",      # ← NUEVO
     "15m": "15m",
     "1h":  "1H",
     "4h":  "4H",
@@ -164,6 +165,7 @@ def guardar_cache(symbol, data):
 
 
 def actualizar_pulso(symbol, ahora):
+    velas_5m  = fetch_okx_klines(symbol, "5m",  OKX_LIMIT_VELAS)   # ← NUEVA
     velas_15m = fetch_okx_klines(symbol, "15m", OKX_LIMIT_VELAS)
     velas_1h  = fetch_okx_klines(symbol, "1h",  OKX_LIMIT_VELAS)
     velas_4h  = fetch_okx_klines(symbol, "4h",  OKX_LIMIT_VELAS)
@@ -230,6 +232,7 @@ def actualizar_pulso(symbol, ahora):
     cache["symbol"] = symbol
     cache["updated_at"] = ahora.isoformat()
     cache["pulso"] = pulso
+    cache["velas_5m"]  = velas_5m     # ← NUEVA
     cache["velas_15m"] = velas_15m
     cache["velas_1h"]  = velas_1h
 
