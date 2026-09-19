@@ -12,19 +12,19 @@
       77000.0
     ],
     "ultimo_evento": "BOS ALCISTA",
-    "ultimo_ts": 1789785900000,
-    "macd_actual": 116.5362,
-    "macd_signal": 132.325,
-    "macd_hist": -15.7888,
+    "ultimo_ts": 1789786800000,
+    "macd_actual": 111.71,
+    "macd_signal": 128.1707,
+    "macd_hist": -16.4606,
     "high_5": 81455.3,
-    "low_5": 81173.0,
-    "actualizado": "2026-09-19T03:04:31.457899+00:00"
+    "low_5": 81261.0,
+    "actualizado": "2026-09-19T03:22:46.139120+00:00"
   },
   "BTC_1h": {
     "trend": 1,
-    "swing_high": 78578.6,
+    "swing_high": null,
     "swing_low": 76220.0,
-    "swing_high_idx": 0,
+    "swing_high_idx": null,
     "swing_low_idx": 50,
     "niveles_alertados": [
       77912.3,
@@ -33,21 +33,66 @@
       78866.9,
       79124.6,
       79328.9,
-      79600.0
+      79600.0,
+      78262.5
     ],
     "ultimo_evento": "BOS ALCISTA",
-    "ultimo_ts": 1789783200000,
-    "macd_actual": 1049.0429,
-    "macd_signal": 1054.1816,
-    "macd_hist": -5.1387,
+    "ultimo_ts": 1789786800000,
+    "macd_actual": 1004.8053,
+    "macd_signal": 1043.7099,
+    "macd_hist": -38.9046,
     "high_5": 81748.0,
     "low_5": 80847.5,
-    "actualizado": "2026-09-19T02:22:55.291678+00:00"
+    "actualizado": "2026-09-19T03:22:46.139667+00:00",
+    "pending": {
+      "tipo": "BOS ALCISTA",
+      "direccion": "up",
+      "creado_ts": 1789786800000,
+      "expira_ts": 1789801200000,
+      "idx_choch": 99,
+      "fibo_zones": [
+        {
+          "mult": 3,
+          "idx": 246,
+          "distancia_velas": 147
+        },
+        {
+          "mult": 5,
+          "idx": 344,
+          "distancia_velas": 245
+        },
+        {
+          "mult": 8,
+          "idx": 491,
+          "distancia_velas": 392
+        },
+        {
+          "mult": 13,
+          "idx": 736,
+          "distancia_velas": 637
+        },
+        {
+          "mult": 21,
+          "idx": 1128,
+          "distancia_velas": 1029
+        },
+        {
+          "mult": 34,
+          "idx": 1765,
+          "distancia_velas": 1666
+        }
+      ],
+      "poc_top": 76489.08333333334,
+      "poc_btm": 76250.04166666667,
+      "poc_precio": 76369.5625,
+      "rango_top": 81748.0,
+      "rango_btm": 76011.0
+    }
   },
   "ETH_15m": {
     "trend": 1,
     "swing_high": 2459.98,
-    "swing_low": 2450.61,
+    "swing_low": 2455.97,
     "swing_high_idx": 0,
     "swing_low_idx": 0,
     "niveles_alertados": [
@@ -59,13 +104,13 @@
       2478.11
     ],
     "ultimo_evento": "BOS ALCISTA",
-    "ultimo_ts": 1789785900000,
-    "macd_actual": 1.6333,
-    "macd_signal": 2.5604,
-    "macd_hist": -0.9271,
-    "high_5": 2623.04,
+    "ultimo_ts": 1789786800000,
+    "macd_actual": 2.3686,
+    "macd_signal": 2.5647,
+    "macd_hist": -0.1962,
+    "high_5": 2632.18,
     "low_5": 2612.08,
-    "actualizado": "2026-09-19T03:04:31.458724+00:00"
+    "actualizado": "2026-09-19T03:22:46.141364+00:00"
   },
   "ETH_1h": {
     "trend": 1,
@@ -83,20 +128,20 @@
       2571.76
     ],
     "ultimo_evento": "BOS ALCISTA",
-    "ultimo_ts": 1789783200000,
-    "macd_actual": 38.1942,
-    "macd_signal": 39.2448,
-    "macd_hist": -1.0506,
-    "high_5": 2634.5,
+    "ultimo_ts": 1789786800000,
+    "macd_actual": 37.6,
+    "macd_signal": 39.0176,
+    "macd_hist": -1.4176,
+    "high_5": 2632.18,
     "low_5": 2603.31,
-    "actualizado": "2026-09-19T02:22:55.292646+00:00"
+    "actualizado": "2026-09-19T03:22:46.141624+00:00"
   },
   "BNB_15m": {
     "trend": 1,
-    "swing_high": null,
+    "swing_high": 753.6,
     "swing_low": 751.0,
-    "swing_high_idx": null,
-    "swing_low_idx": 46,
+    "swing_high_idx": 34,
+    "swing_low_idx": 45,
     "niveles_alertados": [
       726.6,
       724.6,
@@ -106,13 +151,13 @@
       754.0
     ],
     "ultimo_evento": "BOS ALCISTA",
-    "ultimo_ts": 1789785900000,
-    "macd_actual": 0.046,
-    "macd_signal": 0.222,
-    "macd_hist": -0.176,
+    "ultimo_ts": 1789786800000,
+    "macd_actual": 0.0085,
+    "macd_signal": 0.1782,
+    "macd_hist": -0.1698,
     "high_5": 764.8,
-    "low_5": 761.8,
-    "actualizado": "2026-09-19T03:04:31.459578+00:00",
+    "low_5": 761.4,
+    "actualizado": "2026-09-19T03:22:46.142980+00:00",
     "pending": {
       "tipo": "BOS ALCISTA",
       "direccion": "up",
@@ -163,7 +208,7 @@
     "swing_high": 722.8,
     "swing_low": 712.9,
     "swing_high_idx": 0,
-    "swing_low_idx": 44,
+    "swing_low_idx": 43,
     "niveles_alertados": [
       724.9,
       723.6,
@@ -174,36 +219,36 @@
       728.6
     ],
     "ultimo_evento": "BOS ALCISTA",
-    "ultimo_ts": 1789783200000,
-    "macd_actual": 5.9293,
-    "macd_signal": 6.6643,
-    "macd_hist": -0.735,
-    "high_5": 765.1,
+    "ultimo_ts": 1789786800000,
+    "macd_actual": 5.4429,
+    "macd_signal": 6.399,
+    "macd_hist": -0.9561,
+    "high_5": 765.0,
     "low_5": 759.6,
-    "actualizado": "2026-09-19T02:22:55.293520+00:00"
+    "actualizado": "2026-09-19T03:22:46.143298+00:00"
   },
   "SOL_15m": {
     "trend": 1,
     "swing_high": 102.9,
-    "swing_low": 102.17,
+    "swing_low": 102.35,
     "swing_high_idx": 0,
-    "swing_low_idx": 1,
+    "swing_low_idx": 0,
     "niveles_alertados": [
       100.25,
       101.14
     ],
     "ultimo_evento": "BOS ALCISTA",
-    "ultimo_ts": 1789785900000,
-    "macd_actual": 0.2767,
-    "macd_signal": 0.3267,
-    "macd_hist": -0.05,
-    "high_5": 114.1,
+    "ultimo_ts": 1789786800000,
+    "macd_actual": 0.2754,
+    "macd_signal": 0.3163,
+    "macd_hist": -0.0409,
+    "high_5": 113.87,
     "low_5": 113.35,
-    "actualizado": "2026-09-19T03:04:31.460345+00:00"
+    "actualizado": "2026-09-19T03:22:46.144607+00:00"
   },
   "SOL_1h": {
     "trend": 1,
-    "swing_high": 103.03,
+    "swing_high": 102.86,
     "swing_low": 98.47,
     "swing_high_idx": 0,
     "swing_low_idx": null,
@@ -213,90 +258,90 @@
       101.99
     ],
     "ultimo_evento": "BOS ALCISTA",
-    "ultimo_ts": 1789783200000,
-    "macd_actual": 2.6765,
-    "macd_signal": 2.7221,
-    "macd_hist": -0.0457,
+    "ultimo_ts": 1789786800000,
+    "macd_actual": 2.5867,
+    "macd_signal": 2.6948,
+    "macd_hist": -0.1081,
     "high_5": 114.1,
     "low_5": 112.38,
-    "actualizado": "2026-09-19T02:22:55.294380+00:00"
+    "actualizado": "2026-09-19T03:22:46.144867+00:00"
   },
   "ARB_15m": {
     "trend": 1,
-    "swing_high": 0.22037,
+    "swing_high": 0.21997,
     "swing_low": 0.2075,
-    "swing_high_idx": 93,
-    "swing_low_idx": 54,
+    "swing_high_idx": 91,
+    "swing_low_idx": 53,
     "niveles_alertados": [
       0.20773,
       0.20864
     ],
     "ultimo_evento": "BOS ALCISTA",
-    "ultimo_ts": 1789785900000,
+    "ultimo_ts": 1789786800000,
     "macd_actual": -0.0009,
-    "macd_signal": -0.0003,
-    "macd_hist": -0.0006,
+    "macd_signal": -0.0004,
+    "macd_hist": -0.0005,
     "high_5": 0.21957,
-    "low_5": 0.21357,
-    "actualizado": "2026-09-19T03:04:31.461095+00:00"
+    "low_5": 0.2148,
+    "actualizado": "2026-09-19T03:22:46.146289+00:00"
   },
   "ARB_1h": {
     "trend": 0,
     "swing_high": 0.13477,
-    "swing_low": 0.13295,
+    "swing_low": 0.13156,
     "swing_high_idx": 3,
-    "swing_low_idx": 10,
+    "swing_low_idx": 0,
     "niveles_alertados": [],
     "ultimo_evento": null,
-    "ultimo_ts": 1789783200000,
-    "macd_actual": 0.0071,
-    "macd_signal": 0.0086,
-    "macd_hist": -0.0015,
+    "ultimo_ts": 1789786800000,
+    "macd_actual": 0.0065,
+    "macd_signal": 0.0082,
+    "macd_hist": -0.0017,
     "high_5": 0.23019,
     "low_5": 0.21357,
-    "actualizado": "2026-09-19T02:22:55.295222+00:00"
+    "actualizado": "2026-09-19T03:22:46.146579+00:00"
   },
   "UNI_15m": {
     "trend": 1,
     "swing_high": 8.941,
     "swing_low": 8.831,
-    "swing_high_idx": 85,
-    "swing_low_idx": 94,
+    "swing_high_idx": 84,
+    "swing_low_idx": 93,
     "niveles_alertados": [
       8.78,
       8.941
     ],
     "ultimo_evento": "BOS ALCISTA",
-    "ultimo_ts": 1789785900000,
-    "macd_actual": 0.0291,
-    "macd_signal": 0.0153,
-    "macd_hist": 0.0138,
+    "ultimo_ts": 1789786800000,
+    "macd_actual": 0.0419,
+    "macd_signal": 0.0213,
+    "macd_hist": 0.0206,
     "high_5": 9.2,
-    "low_5": 8.949,
-    "actualizado": "2026-09-19T03:04:31.461807+00:00"
+    "low_5": 8.956,
+    "actualizado": "2026-09-19T03:22:46.147927+00:00"
   },
   "UNI_1h": {
     "trend": 0,
-    "swing_high": 6.742,
+    "swing_high": 6.713,
     "swing_low": 6.364,
-    "swing_high_idx": null,
+    "swing_high_idx": 0,
     "swing_low_idx": 47,
     "niveles_alertados": [],
     "ultimo_evento": null,
-    "ultimo_ts": 1789783200000,
-    "macd_actual": 0.2743,
-    "macd_signal": 0.3161,
-    "macd_hist": -0.0418,
-    "high_5": 9.171,
-    "low_5": 8.685,
-    "actualizado": "2026-09-19T02:22:55.296054+00:00"
+    "ultimo_ts": 1789786800000,
+    "macd_actual": 0.2614,
+    "macd_signal": 0.3035,
+    "macd_hist": -0.0421,
+    "high_5": 9.2,
+    "low_5": 8.784,
+    "actualizado": "2026-09-19T03:22:46.148211+00:00"
   },
   "LTC_15m": {
     "trend": 1,
     "swing_high": 55.27,
     "swing_low": 55.07,
     "swing_high_idx": 43,
-    "swing_low_idx": 44,
+    "swing_low_idx": 43,
     "niveles_alertados": [
       52.29,
       52.81,
@@ -310,20 +355,20 @@
       55.27
     ],
     "ultimo_evento": "BOS ALCISTA",
-    "ultimo_ts": 1789785900000,
-    "macd_actual": 0.4049,
-    "macd_signal": 0.4417,
-    "macd_hist": -0.0368,
+    "ultimo_ts": 1789786800000,
+    "macd_actual": 0.4167,
+    "macd_signal": 0.4385,
+    "macd_hist": -0.0218,
     "high_5": 58.96,
     "low_5": 58.42,
-    "actualizado": "2026-09-19T03:04:31.462548+00:00"
+    "actualizado": "2026-09-19T03:22:46.149444+00:00"
   },
   "LTC_1h": {
     "trend": 1,
-    "swing_high": 53.45,
+    "swing_high": 52.63,
     "swing_low": 51.56,
-    "swing_high_idx": 0,
-    "swing_low_idx": null,
+    "swing_high_idx": 8,
+    "swing_low_idx": 48,
     "niveles_alertados": [
       54.5,
       54.3,
@@ -332,13 +377,13 @@
       53.97
     ],
     "ultimo_evento": "BOS ALCISTA",
-    "ultimo_ts": 1789783200000,
-    "macd_actual": 1.1231,
-    "macd_signal": 0.9678,
-    "macd_hist": 0.1553,
+    "ultimo_ts": 1789786800000,
+    "macd_actual": 1.1355,
+    "macd_signal": 0.9995,
+    "macd_hist": 0.1359,
     "high_5": 59.0,
-    "low_5": 56.98,
-    "actualizado": "2026-09-19T02:22:55.296872+00:00"
+    "low_5": 57.53,
+    "actualizado": "2026-09-19T03:22:46.149703+00:00"
   },
   "INJ_15m": {
     "trend": 1,
@@ -351,17 +396,17 @@
       6.57
     ],
     "ultimo_evento": "BOS ALCISTA",
-    "ultimo_ts": 1789785900000,
-    "macd_actual": 0.0636,
-    "macd_signal": 0.0484,
-    "macd_hist": 0.0151,
+    "ultimo_ts": 1789786800000,
+    "macd_actual": 0.0598,
+    "macd_signal": 0.05,
+    "macd_hist": 0.0098,
     "high_5": 6.918,
-    "low_5": 6.747,
-    "actualizado": "2026-09-19T03:04:31.463291+00:00"
+    "low_5": 6.749,
+    "actualizado": "2026-09-19T03:22:46.150943+00:00"
   },
   "INJ_1h": {
     "trend": 1,
-    "swing_high": 6.328,
+    "swing_high": 6.297,
     "swing_low": 5.459,
     "swing_high_idx": 0,
     "swing_low_idx": null,
@@ -373,13 +418,13 @@
       6.388
     ],
     "ultimo_evento": "BOS ALCISTA",
-    "ultimo_ts": 1789783200000,
-    "macd_actual": 0.2096,
-    "macd_signal": 0.2211,
-    "macd_hist": -0.0115,
-    "high_5": 6.847,
-    "low_5": 6.528,
-    "actualizado": "2026-09-19T02:22:55.297714+00:00"
+    "ultimo_ts": 1789786800000,
+    "macd_actual": 0.2094,
+    "macd_signal": 0.2188,
+    "macd_hist": -0.0093,
+    "high_5": 6.918,
+    "low_5": 6.558,
+    "actualizado": "2026-09-19T03:22:46.151222+00:00"
   },
   "LINK_15m": {
     "trend": 1,
@@ -391,20 +436,20 @@
       11.349
     ],
     "ultimo_evento": "BOS ALCISTA",
-    "ultimo_ts": 1789785900000,
-    "macd_actual": 0.0393,
-    "macd_signal": 0.0301,
-    "macd_hist": 0.0092,
-    "high_5": 12.478,
-    "low_5": 12.323,
-    "actualizado": "2026-09-19T03:04:31.464022+00:00"
+    "ultimo_ts": 1789786800000,
+    "macd_actual": 0.0426,
+    "macd_signal": 0.0327,
+    "macd_hist": 0.0099,
+    "high_5": 12.496,
+    "low_5": 12.331,
+    "actualizado": "2026-09-19T03:22:46.152470+00:00"
   },
   "LINK_1h": {
     "trend": 1,
-    "swing_high": 11.561,
+    "swing_high": 11.628,
     "swing_low": 11.012,
-    "swing_high_idx": 4,
-    "swing_low_idx": 49,
+    "swing_high_idx": 2,
+    "swing_low_idx": 48,
     "niveles_alertados": [
       11.441,
       11.512,
@@ -412,67 +457,67 @@
       11.758
     ],
     "ultimo_evento": "BOS ALCISTA",
-    "ultimo_ts": 1789783200000,
-    "macd_actual": 0.2127,
+    "ultimo_ts": 1789786800000,
+    "macd_actual": 0.2156,
     "macd_signal": 0.2195,
-    "macd_hist": -0.0068,
-    "high_5": 12.427,
+    "macd_hist": -0.0039,
+    "high_5": 12.496,
     "low_5": 12.215,
-    "actualizado": "2026-09-19T02:22:55.298568+00:00"
+    "actualizado": "2026-09-19T03:22:46.152729+00:00"
   },
   "ENA_15m": {
     "trend": 1,
     "swing_high": 0.16499,
     "swing_low": 0.16337,
-    "swing_high_idx": 60,
-    "swing_low_idx": 62,
+    "swing_high_idx": 59,
+    "swing_low_idx": 61,
     "niveles_alertados": [
       0.15436,
       0.16423,
       0.16499
     ],
     "ultimo_evento": "BOS ALCISTA",
-    "ultimo_ts": 1789785900000,
-    "macd_actual": 0.0017,
-    "macd_signal": 0.0014,
-    "macd_hist": 0.0003,
+    "ultimo_ts": 1789786800000,
+    "macd_actual": 0.0018,
+    "macd_signal": 0.0015,
+    "macd_hist": 0.0004,
     "high_5": 0.17712,
-    "low_5": 0.17168,
-    "actualizado": "2026-09-19T03:04:31.464728+00:00"
+    "low_5": 0.17173,
+    "actualizado": "2026-09-19T03:22:46.153973+00:00"
   },
   "ENA_1h": {
     "trend": 0,
-    "swing_high": 0.14573,
+    "swing_high": 0.14504,
     "swing_low": 0.14274,
-    "swing_high_idx": 19,
+    "swing_high_idx": 0,
     "swing_low_idx": 35,
     "niveles_alertados": [],
     "ultimo_evento": null,
-    "ultimo_ts": 1789783200000,
-    "macd_actual": 0.0036,
-    "macd_signal": 0.0032,
-    "macd_hist": 0.0003,
-    "high_5": 0.17589,
-    "low_5": 0.16638,
-    "actualizado": "2026-09-19T02:22:55.299404+00:00"
+    "ultimo_ts": 1789786800000,
+    "macd_actual": 0.0038,
+    "macd_signal": 0.0034,
+    "macd_hist": 0.0004,
+    "high_5": 0.17712,
+    "low_5": 0.1674,
+    "actualizado": "2026-09-19T03:22:46.154244+00:00"
   },
   "SUSHI_15m": {
     "trend": 1,
     "swing_high": 0.2488,
     "swing_low": 0.2494,
-    "swing_high_idx": 91,
-    "swing_low_idx": 96,
+    "swing_high_idx": 90,
+    "swing_low_idx": 95,
     "niveles_alertados": [
       0.2488
     ],
     "ultimo_evento": "CHoCH ALCISTA",
-    "ultimo_ts": 1789785900000,
-    "macd_actual": 0.0003,
+    "ultimo_ts": 1789786800000,
+    "macd_actual": 0.0004,
     "macd_signal": 0.0001,
     "macd_hist": 0.0002,
     "high_5": 0.2525,
-    "low_5": 0.2477,
-    "actualizado": "2026-09-19T03:04:31.465455+00:00",
+    "low_5": 0.2494,
+    "actualizado": "2026-09-19T03:22:46.155505+00:00",
     "pending": {
       "tipo": "CHoCH ALCISTA",
       "direccion": "up",
@@ -523,50 +568,50 @@
     "swing_high": 0.2164,
     "swing_low": 0.2086,
     "swing_high_idx": 7,
-    "swing_low_idx": 47,
+    "swing_low_idx": 46,
     "niveles_alertados": [],
     "ultimo_evento": null,
-    "ultimo_ts": 1789783200000,
-    "macd_actual": 0.0046,
-    "macd_signal": 0.0053,
+    "ultimo_ts": 1789786800000,
+    "macd_actual": 0.0044,
+    "macd_signal": 0.0051,
     "macd_hist": -0.0007,
-    "high_5": 0.2518,
+    "high_5": 0.2525,
     "low_5": 0.2437,
-    "actualizado": "2026-09-19T02:22:55.300288+00:00"
+    "actualizado": "2026-09-19T03:22:46.155768+00:00"
   },
   "RAY_15m": {
     "trend": 1,
     "swing_high": 1.7177,
     "swing_low": 1.6976,
-    "swing_high_idx": 47,
-    "swing_low_idx": 61,
+    "swing_high_idx": 45,
+    "swing_low_idx": 60,
     "niveles_alertados": [
       1.7177
     ],
     "ultimo_evento": "CHoCH ALCISTA",
-    "ultimo_ts": 1789785900000,
-    "macd_actual": 0.0021,
-    "macd_signal": 0.0034,
-    "macd_hist": -0.0013,
+    "ultimo_ts": 1789786800000,
+    "macd_actual": 0.0016,
+    "macd_signal": 0.003,
+    "macd_hist": -0.0014,
     "high_5": 1.7577,
-    "low_5": 1.722,
-    "actualizado": "2026-09-19T03:04:31.466187+00:00"
+    "low_5": 1.7223,
+    "actualizado": "2026-09-19T03:22:46.157059+00:00"
   },
   "RAY_1h": {
     "trend": 0,
-    "swing_high": 1.406,
+    "swing_high": 1.414,
     "swing_low": 1.3122,
     "swing_high_idx": 0,
     "swing_low_idx": null,
     "niveles_alertados": [],
     "ultimo_evento": null,
-    "ultimo_ts": 1789783200000,
-    "macd_actual": 0.0448,
-    "macd_signal": 0.0516,
-    "macd_hist": -0.0068,
+    "ultimo_ts": 1789786800000,
+    "macd_actual": 0.0419,
+    "macd_signal": 0.0496,
+    "macd_hist": -0.0077,
     "high_5": 1.7951,
-    "low_5": 1.7137,
-    "actualizado": "2026-09-19T02:22:55.301156+00:00"
+    "low_5": 1.7155,
+    "actualizado": "2026-09-19T03:22:46.157333+00:00"
   },
   "HYPE_15m": {
     "trend": 0,
@@ -576,49 +621,49 @@
     "swing_low_idx": 11,
     "niveles_alertados": [],
     "ultimo_evento": null,
-    "ultimo_ts": 1789785900000,
-    "macd_actual": 0.5139,
-    "macd_signal": 0.4461,
-    "macd_hist": 0.0678,
-    "high_5": 94.286,
-    "low_5": 93.065,
-    "actualizado": "2026-09-19T03:04:31.466961+00:00"
+    "ultimo_ts": 1789786800000,
+    "macd_actual": 0.5635,
+    "macd_signal": 0.4704,
+    "macd_hist": 0.0931,
+    "high_5": 94.571,
+    "low_5": 93.17,
+    "actualizado": "2026-09-19T03:22:46.158583+00:00"
   },
   "HYPE_1h": {
     "trend": 0,
     "swing_high": 80.444,
     "swing_low": 78.208,
     "swing_high_idx": null,
-    "swing_low_idx": null,
+    "swing_low_idx": 36,
     "niveles_alertados": [],
     "ultimo_evento": null,
-    "ultimo_ts": 1789783200000,
-    "macd_actual": 2.0004,
-    "macd_signal": 2.0857,
-    "macd_hist": -0.0853,
-    "high_5": 93.984,
-    "low_5": 91.413,
-    "actualizado": "2026-09-19T02:22:55.302002+00:00"
+    "ultimo_ts": 1789786800000,
+    "macd_actual": 2.0663,
+    "macd_signal": 2.0885,
+    "macd_hist": -0.0222,
+    "high_5": 94.571,
+    "low_5": 92.263,
+    "actualizado": "2026-09-19T03:22:46.158841+00:00"
   },
   "ZEC_15m": {
     "trend": 1,
     "swing_high": 1481.73,
     "swing_low": 1469.69,
-    "swing_high_idx": 57,
-    "swing_low_idx": 71,
+    "swing_high_idx": 56,
+    "swing_low_idx": 70,
     "niveles_alertados": [
       1461.4,
       1465.01,
       1481.73
     ],
     "ultimo_evento": "CHoCH ALCISTA",
-    "ultimo_ts": 1789785900000,
-    "macd_actual": 15.6592,
-    "macd_signal": 20.0599,
-    "macd_hist": -4.4007,
-    "high_5": 1570.86,
-    "low_5": 1548.0,
-    "actualizado": "2026-09-19T03:04:31.467686+00:00"
+    "ultimo_ts": 1789786800000,
+    "macd_actual": 13.9567,
+    "macd_signal": 18.7907,
+    "macd_hist": -4.834,
+    "high_5": 1568.0,
+    "low_5": 1547.42,
+    "actualizado": "2026-09-19T03:22:46.160031+00:00"
   },
   "ZEC_1h": {
     "trend": 0,
@@ -628,18 +673,18 @@
     "swing_low_idx": 30,
     "niveles_alertados": [],
     "ultimo_evento": null,
-    "ultimo_ts": 1789783200000,
-    "macd_actual": 29.6888,
-    "macd_signal": 22.6424,
-    "macd_hist": 7.0464,
+    "ultimo_ts": 1789786800000,
+    "macd_actual": 29.0577,
+    "macd_signal": 23.7758,
+    "macd_hist": 5.2819,
     "high_5": 1588.8,
-    "low_5": 1491.48,
-    "actualizado": "2026-09-19T02:22:55.302841+00:00"
+    "low_5": 1547.14,
+    "actualizado": "2026-09-19T03:22:46.160291+00:00"
   },
   "DOGE_15m": {
     "trend": 1,
     "swing_high": null,
-    "swing_low": 0.08226,
+    "swing_low": 0.08252,
     "swing_high_idx": null,
     "swing_low_idx": 0,
     "niveles_alertados": [
@@ -647,13 +692,13 @@
       0.08793
     ],
     "ultimo_evento": "BOS ALCISTA",
-    "ultimo_ts": 1789785900000,
+    "ultimo_ts": 1789786800000,
     "macd_actual": 0.0001,
     "macd_signal": 0.0001,
     "macd_hist": 0.0,
     "high_5": 0.08888,
-    "low_5": 0.08766,
-    "actualizado": "2026-09-19T03:04:31.468448+00:00",
+    "low_5": 0.08799,
+    "actualizado": "2026-09-19T03:22:46.161421+00:00",
     "pending": {
       "tipo": "BOS ALCISTA",
       "direccion": "up",
@@ -704,7 +749,7 @@
     "swing_high": 0.08393,
     "swing_low": 0.08049,
     "swing_high_idx": 3,
-    "swing_low_idx": 50,
+    "swing_low_idx": 49,
     "niveles_alertados": [
       0.08416,
       0.08391,
@@ -714,13 +759,13 @@
       0.0852
     ],
     "ultimo_evento": "BOS ALCISTA",
-    "ultimo_ts": 1789783200000,
-    "macd_actual": 0.0013,
-    "macd_signal": 0.0014,
+    "ultimo_ts": 1789786800000,
+    "macd_actual": 0.0012,
+    "macd_signal": 0.0013,
     "macd_hist": -0.0001,
-    "high_5": 0.0887,
+    "high_5": 0.08888,
     "low_5": 0.0871,
-    "actualizado": "2026-09-19T02:22:55.303869+00:00"
+    "actualizado": "2026-09-19T03:22:46.161628+00:00"
   },
   "STX_15m": {
     "trend": 0,
@@ -730,20 +775,20 @@
     "swing_low_idx": 2,
     "niveles_alertados": [],
     "ultimo_evento": null,
-    "ultimo_ts": 1789785900000,
-    "macd_actual": 0.0008,
+    "ultimo_ts": 1789786800000,
+    "macd_actual": 0.0011,
     "macd_signal": 0.0012,
-    "macd_hist": -0.0004,
-    "high_5": 0.2859,
+    "macd_hist": -0.0001,
+    "high_5": 0.288,
     "low_5": 0.2835,
-    "actualizado": "2026-09-19T03:04:31.469171+00:00"
+    "actualizado": "2026-09-19T03:22:46.162903+00:00"
   },
   "STX_1h": {
     "trend": 1,
-    "swing_high": 0.2639,
+    "swing_high": 0.2669,
     "swing_low": 0.2392,
-    "swing_high_idx": null,
-    "swing_low_idx": 60,
+    "swing_high_idx": 1,
+    "swing_low_idx": 59,
     "niveles_alertados": [
       0.2675,
       0.2713,
@@ -753,19 +798,19 @@
       0.2708
     ],
     "ultimo_evento": "BOS ALCISTA",
-    "ultimo_ts": 1789783200000,
+    "ultimo_ts": 1789786800000,
     "macd_actual": 0.0067,
-    "macd_signal": 0.007,
-    "macd_hist": -0.0003,
-    "high_5": 0.2908,
+    "macd_signal": 0.0069,
+    "macd_hist": -0.0002,
+    "high_5": 0.2894,
     "low_5": 0.2809,
-    "actualizado": "2026-09-19T02:22:55.304732+00:00"
+    "actualizado": "2026-09-19T03:22:46.163178+00:00"
   },
   "DASH_15m": {
     "trend": 1,
-    "swing_high": 61.41,
+    "swing_high": null,
     "swing_low": 59.21,
-    "swing_high_idx": 16,
+    "swing_high_idx": null,
     "swing_low_idx": 67,
     "niveles_alertados": [
       60.59,
@@ -774,33 +819,78 @@
       59.57,
       61.07,
       61.27,
-      61.41
+      61.41,
+      61.66
     ],
     "ultimo_evento": "BOS ALCISTA",
-    "ultimo_ts": 1789785900000,
-    "macd_actual": 0.4172,
-    "macd_signal": 0.5983,
-    "macd_hist": -0.1811,
+    "ultimo_ts": 1789786800000,
+    "macd_actual": 0.3387,
+    "macd_signal": 0.5419,
+    "macd_hist": -0.2031,
     "high_5": 63.2,
     "low_5": 62.19,
-    "actualizado": "2026-09-19T03:04:31.469903+00:00"
+    "actualizado": "2026-09-19T03:22:46.164381+00:00",
+    "pending": {
+      "tipo": "BOS ALCISTA",
+      "direccion": "up",
+      "creado_ts": 1789786800000,
+      "expira_ts": 1789801200000,
+      "idx_choch": 99,
+      "fibo_zones": [
+        {
+          "mult": 3,
+          "idx": 195,
+          "distancia_velas": 96
+        },
+        {
+          "mult": 5,
+          "idx": 259,
+          "distancia_velas": 160
+        },
+        {
+          "mult": 8,
+          "idx": 355,
+          "distancia_velas": 256
+        },
+        {
+          "mult": 13,
+          "idx": 515,
+          "distancia_velas": 416
+        },
+        {
+          "mult": 21,
+          "idx": 771,
+          "distancia_velas": 672
+        },
+        {
+          "mult": 34,
+          "idx": 1187,
+          "distancia_velas": 1088
+        }
+      ],
+      "poc_top": 60.982499999999995,
+      "poc_btm": 60.75375,
+      "poc_precio": 60.86812499999999,
+      "rango_top": 65.1,
+      "rango_btm": 59.61
+    }
   },
   "DASH_1h": {
     "trend": 1,
     "swing_high": 60.14,
     "swing_low": 58.52,
-    "swing_high_idx": 88,
-    "swing_low_idx": 91,
+    "swing_high_idx": 87,
+    "swing_low_idx": 90,
     "niveles_alertados": [
       60.14
     ],
     "ultimo_evento": "CHoCH ALCISTA",
-    "ultimo_ts": 1789783200000,
-    "macd_actual": 0.8285,
-    "macd_signal": 0.5308,
-    "macd_hist": 0.2977,
+    "ultimo_ts": 1789786800000,
+    "macd_actual": 0.8105,
+    "macd_signal": 0.5826,
+    "macd_hist": 0.2279,
     "high_5": 65.1,
-    "low_5": 61.27,
-    "actualizado": "2026-09-19T02:22:55.305567+00:00"
+    "low_5": 61.93,
+    "actualizado": "2026-09-19T03:22:46.164635+00:00"
   }
 }
