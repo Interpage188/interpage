@@ -362,8 +362,10 @@ def analizar_timeframe(velas, estado_tf):
 def verificar_pending(pending, velas_tf, velas_5m):
     """
     Verifica si el precio volvió al POC + cruce MACD en 5m → entrada.
-    velas_tf: velas del TF donde se detectó el CHoCH (para precio actual)
-    velas_5m: velas de 5m para confirmación MACD fina
+
+    [FIX MULTI-TF] Bloquea el entry si el 5m ya cambió de dirección
+    contra el TF que detectó el CHoCH. Evita entrar cuando el 5m
+    ya está en la dirección contraria al pending.
     """
     if not pending or not velas_tf:
         return None
@@ -382,6 +384,30 @@ def verificar_pending(pending, velas_tf, velas_5m):
             break
     if not en_zona:
         return None
+
+    # [FIX MULTI-TF] Verificar dirección del 5m
+    if velas_5m and len(velas_5m) >= 2:
+        cierre_5m_actual = float(velas_5m[-1]["c"])
+        cierre_5m_previo = float(velas_5m[-2]["c"])
+
+        if cierre_5m_actual > cierre_5m_previo:
+            direccion_5m = "up"
+        elif cierre_5m_actual < cierre_5m_previo:
+            direccion_5m = "down"
+        else:
+            direccion_5m = "flat"
+
+        d = pending["direccion"]
+
+        # Conflicto: pending SHORT pero el 5m ya está subiendo
+        if d == "down" and direccion_5m == "up":
+            print(f"      ⏭️ Bloqueado: pending SHORT pero 5m ya está UP", flush=True)
+            return None
+
+        # Conflicto: pending LONG pero el 5m ya está bajando
+        if d == "up" and direccion_5m == "down":
+            print(f"      ⏭️ Bloqueado: pending LONG pero 5m ya está DOWN", flush=True)
+            return None
 
     # Cruce MACD en 5m (timing fino)
     cierres = [v["c"] for v in fuente]
@@ -408,32 +434,6 @@ def fibo_activo_en_pending(pending, velas):
     if velas_desde < 0:
         return None
     return fibo_time_activo(velas, pending["fibo_zones"], velas_desde)
-
-
-# ============================================================
-# TELEGRAM
-# ============================================================
-
-def enviar_telegram(msg):
-    if not hora_permite_envio():
-        print("   ⏰ Fuera de horario.", flush=True)
-        return False
-    token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
-    if not token or not chat_id:
-        print("   ⚠️ Telegram no configurado.", flush=True)
-        return False
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    data = f"chat_id={urllib.parse.quote(str(chat_id))}&text={urllib.parse.quote(msg)}".encode("utf-8")
-    req = urllib.request.Request(url, data=data,
-        headers={"Content-Type": "application/x-www-form-urlencoded"}, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=20) as r:
-            return json.loads(r.read().decode("utf-8")).get("ok", False)
-    except Exception as e:
-        print(f"   ⚠️ Telegram: {str(e)[:60]}", flush=True)
-        return False
-
 
 # ============================================================
 # ESTADO
