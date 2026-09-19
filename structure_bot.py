@@ -359,27 +359,32 @@ def analizar_timeframe(velas, estado_tf):
 # VERIFICACIÓN DE ENTRY
 # ============================================================
 
-def verificar_pending(pending, velas):
-    """Verifica si el precio volvió al POC + cruce MACD → entrada."""
-    if not pending or not velas:
+def verificar_pending(pending, velas_tf, velas_5m):
+    """
+    Verifica si el precio volvió al POC + cruce MACD en 5m → entrada.
+    velas_tf: velas del TF donde se detectó el CHoCH (para precio actual)
+    velas_5m: velas de 5m para confirmación MACD fina
+    """
+    if not pending or not velas_tf:
         return None
-    if velas[-1]["ts"] > pending.get("expira_ts", 0):
+    if velas_tf[-1]["ts"] > pending.get("expira_ts", 0):
         return "EXPIRADO"
 
-    precio = velas[-1]["c"]
+    precio = velas_tf[-1]["c"]
     pb, pt = pending["poc_btm"], pending["poc_top"]
 
-    # ¿Tocó la zona POC?
+    # ¿Tocó la zona POC? Usamos velas de 5m para máxima precisión
+    fuente = velas_5m if velas_5m and len(velas_5m) >= 10 else velas_tf
     en_zona = False
-    for v in velas[-ENTRY_MACD_VENTANA - 1:]:
+    for v in fuente[-ENTRY_MACD_VENTANA - 1:]:
         if v["l"] <= pt and v["h"] >= pb:
             en_zona = True
             break
     if not en_zona:
         return None
 
-    # ¿Hay cruce MACD?
-    cierres = [v["c"] for v in velas]
+    # Cruce MACD en 5m (timing fino)
+    cierres = [v["c"] for v in fuente]
     macd, _ = calcular_macd(cierres)
     cruce = cruce_macd_reciente(macd, ENTRY_MACD_VENTANA)
     if cruce is None:
@@ -482,10 +487,10 @@ def main():
             clave = f"{symbol}_{tf}"
             estado_tf = estado_global.get(clave, {})
 
-            # 1. Verificar pending previo
             pend_actual = estado_tf.get("pending")
             if pend_actual:
-                señal = verificar_pending(pend_actual, velas)
+                velas_5m = cache.get("velas_5m", [])
+                señal = verificar_pending(pend_actual, velas, velas_5m)
                 if señal in ("ENTRY LONG", "ENTRY SHORT"):
                     fibo_mult = fibo_activo_en_pending(pend_actual, velas)
                     entries.append({
@@ -541,7 +546,7 @@ def main():
 
     now_lima = (datetime.now(timezone.utc) + LIMA_OFFSET).strftime("%Y-%m-%d %H:%M:%S")
 
-    # 1. CHoCH/BOS
+    # 1. CHoCH/BOS — SOLO log, NO Telegram
     for ev in eventos:
         s, tf, e = ev["symbol"], ev["tf"], ev["evento"]
         icono = "🟢" if e["direccion"] == "up" else "🔴"
@@ -560,10 +565,9 @@ def main():
             msg += f"   ⏳ Esperando retroceso + MACD\n"
         msg += f"⏱️ {tf}\n🕐 {now_lima}\n━━━━━━━━━━━━━━━━━━━"
         print(f"\n{msg}", flush=True)
-        if enviar_telegram(msg):
-            print("   ✅ Enviado", flush=True)
+        # enviar_telegram(msg)  # ← DESACTIVADO: solo log, no Telegram
 
-    # 2. ENTRADAS (señal real)
+    # 2. ENTRADAS (señal real) — SÍ Telegram
     for en in entries:
         s, tf = en["symbol"], en["tf"]
         p, precio, tipo = en["pending"], en["precio"], en["señal"]
