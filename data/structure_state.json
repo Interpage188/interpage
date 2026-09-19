@@ -892,9 +892,9 @@
   },
   "DASH_15m": {
     "trend": -1,
-    "swing_high": 62.0,
+    "swing_high": 61.86,
     "swing_low": null,
-    "swing_high_idx": 47,
+    "swing_high_idx": 40,
     "swing_low_idx": null,
     "niveles_alertados": [
       60.59,
@@ -906,58 +906,59 @@
       61.41,
       61.66,
       61.86,
-      58.63
+      58.63,
+      59.04
     ],
-    "ultimo_evento": "CHoCH BAJISTA",
-    "ultimo_ts": 1789842600000,
-    "macd_actual": -0.3743,
-    "macd_signal": -0.3001,
-    "macd_hist": -0.0742,
-    "high_5": 59.57,
+    "ultimo_evento": "BOS BAJISTA",
+    "ultimo_ts": 1789843500000,
+    "macd_actual": -0.3641,
+    "macd_signal": -0.3104,
+    "macd_hist": -0.0537,
+    "high_5": 59.3,
     "low_5": 58.37,
-    "actualizado": "2026-09-19T18:37:06.465359+00:00",
+    "actualizado": "2026-09-19T18:49:28.446481+00:00",
     "pending": {
-      "tipo": "CHoCH BAJISTA",
+      "tipo": "BOS BAJISTA",
       "direccion": "down",
-      "creado_ts": 1789842600000,
-      "expira_ts": 1789857000000,
+      "creado_ts": 1789843500000,
+      "expira_ts": 1789857900000,
       "idx_choch": 99,
       "fibo_zones": [
         {
           "mult": 3,
-          "idx": 255,
-          "distancia_velas": 156
+          "idx": 276,
+          "distancia_velas": 177
         },
         {
           "mult": 5,
-          "idx": 359,
-          "distancia_velas": 260
+          "idx": 394,
+          "distancia_velas": 295
         },
         {
           "mult": 8,
-          "idx": 515,
-          "distancia_velas": 416
+          "idx": 571,
+          "distancia_velas": 472
         },
         {
           "mult": 13,
-          "idx": 775,
-          "distancia_velas": 676
+          "idx": 866,
+          "distancia_velas": 767
         },
         {
           "mult": 21,
-          "idx": 1191,
-          "distancia_velas": 1092
+          "idx": 1338,
+          "distancia_velas": 1239
         },
         {
           "mult": 34,
-          "idx": 1867,
-          "distancia_velas": 1768
+          "idx": 2105,
+          "distancia_velas": 2006
         }
       ],
-      "poc_top": 59.855,
-      "poc_btm": 59.72,
-      "poc_precio": 59.787499999999994,
-      "rango_top": 61.61,
+      "poc_top": 60.79,
+      "poc_btm": 60.63875,
+      "poc_precio": 60.714375000000004,
+      "rango_top": 62.0,
       "rango_btm": 58.37
     }
   },
