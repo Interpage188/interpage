@@ -573,7 +573,8 @@ def main():
         p, precio, tipo = en["pending"], en["precio"], en["señal"]
         icono = "🟢" if tipo == "ENTRY LONG" else "🔴"
         accion = "COMPRA" if tipo == "ENTRY LONG" else "VENTA"
-        msg = (f"🎯 ¡{accion} {s}!\n"
+        msg = (f"🎯 STRUCTURE BOT V1\n"
+               f"¡{accion} {s}!\n"
                f"{icono} {tipo}\n"
                f"📈 Precio actual: ${precio:.6f}\n"
                f"🎯 POC: ${p['poc_precio']:.6f}\n"
