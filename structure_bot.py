@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-STRUCTURE BOT — VERSIÓN COMPLETA (Fases 1-5)
+STRUCTURE BOT V1 — Fases 1-5 + Históricos
 - Fase 1: CHoCH / BOS (MACD sobre velas)
 - Fase 2: POC (Volume Profile del impulso)
-- Fase 3: Entry Sniper (retroceso al POC + cruce MACD)
+- Fase 3: Entry Sniper (retroceso al POC + cruce MACD 5m)
 - Fase 4: Fibo Time (proyecciones temporales)
 - Fase 5: Multi-TF (contexto 15m y 1h)
 
-Fixes:
-- Solo LONG si POC < precio actual (no comprar en el techo)
-- Solo SHORT si POC > precio actual (no vender en el piso)
+Filtros:
+- Solo LONG si POC < precio actual
+- Solo SHORT si POC > precio actual
+- Filtro multi-TF (5m vs pending)
+- Filtro de históricos (POCs, SH, SL bloquean entradas)
 - Dedup por nivel alertado
 - Ventana de 3 velas para eventos nuevos
-- Filtro distancia máxima
 """
 
 import json
@@ -52,6 +53,12 @@ ENTRY_EXPIRA_HORAS = 4
 # Fibo Time
 FIBO_MULTIPLOS = [3, 5, 8, 13, 21, 34]
 FIBO_TOLERANCIA_VELAS = 1
+
+# Históricos (filtros internos)
+MAX_POC_HISTORY = 20
+MAX_SH_HISTORY = 10
+MAX_SL_HISTORY = 10
+HISTORICO_BLOQUEO_PCT = 0.50
 
 DATA_DIR = Path("data")
 DATA_DIR.mkdir(exist_ok=True)
@@ -133,13 +140,20 @@ def calcular_poc(velas, idx_inicio, idx_fin, bins=POC_BINS):
     rango = velas[idx_inicio:idx_fin + 1]
     if not rango:
         return None
-    top = max(v["h"] for v in rango)
-    bottom = min(v["l"] for v in rango)
+
+    validos_h = [v["h"] for v in rango if v.get("h") is not None]
+    validos_l = [v["l"] for v in rango if v.get("l") is not None]
+    if not validos_h or not validos_l:
+        return None
+
+    top = max(validos_h)
+    bottom = min(validos_l)
     if top <= bottom:
         return None
     paso = (top - bottom) / bins
     if paso <= 0:
         return None
+
     vol = [0.0] * bins
     for v in rango:
         h, l, vv = v["h"], v["l"], v.get("v", 0)
@@ -169,17 +183,12 @@ def calcular_poc(velas, idx_inicio, idx_fin, bins=POC_BINS):
 # ============================================================
 
 def calcular_fibo_zones(idx_choch, idx_inicio_swing, ts_actual):
-    """
-    Calcula los pivotes temporales futuros.
-    Devuelve lista de dicts con idx proyectado, multiplicador y timestamp.
-    """
     dist = idx_choch - idx_inicio_swing
     if dist <= 0:
         return []
     zonas = []
     for mult in FIBO_MULTIPLOS:
         idx_proyectado = idx_choch + (dist * mult)
-        # Aproximar ts: asumimos que cada vela dura (ts_actual - ts_inicio) / dist
         zonas.append({
             "mult": mult,
             "idx": idx_proyectado,
@@ -189,10 +198,6 @@ def calcular_fibo_zones(idx_choch, idx_inicio_swing, ts_actual):
 
 
 def fibo_time_activo(velas, fibo_zones, velas_desde_choch):
-    """
-    Verifica si estamos en una zona Fibo Time activa.
-    velas_desde_choch = cuántas velas han pasado desde el CHoCH.
-    """
     if not fibo_zones:
         return None
     for fz in fibo_zones:
@@ -217,7 +222,7 @@ def ya_fue_alertado(nivel, niveles):
 
 
 def analizar_timeframe(velas, estado_tf):
-    """Detecta CHoCH/BOS y calcula POC + Fibo zones."""
+    """Detecta CHoCH/BOS y calcula POC + Fibo zones + acumula históricos."""
     if not velas or len(velas) < 40:
         return None, None, estado_tf
 
@@ -246,8 +251,11 @@ def analizar_timeframe(velas, estado_tf):
     sl_idx = estado_tf.get("swing_low_idx")
     trend = estado_tf.get("trend", 0)
     niveles = estado_tf.get("niveles_alertados", [])
+    poc_history = estado_tf.get("poc_history", [])
+    sh_history = estado_tf.get("sh_history", [])
+    sl_history = estado_tf.get("sl_history", [])
 
-    # Detectar swings
+    # Detectar swings y acumular históricos
     for i in range(1, len(macd)):
         mp, mn = macd[i - 1], macd[i]
         if mp <= 0 and mn > 0:
@@ -257,6 +265,8 @@ def analizar_timeframe(velas, estado_tf):
                 if swing_low is None or abs(nl - swing_low) / swing_low * 100 >= MIN_SWING_PCT:
                     swing_low = nl
                     sl_idx = idx
+                    sl_history.append(nl)
+                    sl_history = sl_history[-MAX_SL_HISTORY:]
         if mp >= 0 and mn < 0:
             idx = i - 1
             if 0 <= idx < len(highs):
@@ -264,6 +274,8 @@ def analizar_timeframe(velas, estado_tf):
                 if swing_high is None or abs(nh - swing_high) / swing_high * 100 >= MIN_SWING_PCT:
                     swing_high = nh
                     sh_idx = idx
+                    sh_history.append(nh)
+                    sh_history = sh_history[-MAX_SH_HISTORY:]
 
     cierre = cierres[-1]
     ts_act = ts[-1]
@@ -281,13 +293,13 @@ def analizar_timeframe(velas, estado_tf):
                 "distancia_pct": dist,
             }
             trend = 1
-            # Calcular POC del impulso
             if sl_idx is not None and sl_idx < len(velas) - 1:
                 poc = calcular_poc(velas, sl_idx, len(velas) - 1)
                 if poc:
-                    # FIX: solo crear pending si POC < precio actual (retroceso)
+                    poc_history.append(poc["poc_precio"])
+                    poc_history = poc_history[-MAX_POC_HISTORY:]
+
                     if poc["poc_precio"] < cierre:
-                        # Calcular Fibo zones
                         fibo_zones = calcular_fibo_zones(len(velas) - 1, sl_idx, ts_act)
                         pending = {
                             "tipo": tipo, "direccion": "up",
@@ -295,6 +307,9 @@ def analizar_timeframe(velas, estado_tf):
                             "expira_ts": ts_act + ENTRY_EXPIRA_HORAS * 3600 * 1000,
                             "idx_choch": len(velas) - 1,
                             "fibo_zones": fibo_zones,
+                            "poc_history": list(poc_history),
+                            "sh_history": list(sh_history),
+                            "sl_history": list(sl_history),
                             **poc,
                         }
                     else:
@@ -318,7 +333,9 @@ def analizar_timeframe(velas, estado_tf):
             if sh_idx is not None and sh_idx < len(velas) - 1:
                 poc = calcular_poc(velas, sh_idx, len(velas) - 1)
                 if poc:
-                    # FIX: solo SHORT si POC > precio actual
+                    poc_history.append(poc["poc_precio"])
+                    poc_history = poc_history[-MAX_POC_HISTORY:]
+
                     if poc["poc_precio"] > cierre:
                         fibo_zones = calcular_fibo_zones(len(velas) - 1, sh_idx, ts_act)
                         pending = {
@@ -327,6 +344,9 @@ def analizar_timeframe(velas, estado_tf):
                             "expira_ts": ts_act + ENTRY_EXPIRA_HORAS * 3600 * 1000,
                             "idx_choch": len(velas) - 1,
                             "fibo_zones": fibo_zones,
+                            "poc_history": list(poc_history),
+                            "sh_history": list(sh_history),
+                            "sl_history": list(sl_history),
                             **poc,
                         }
                     else:
@@ -343,6 +363,9 @@ def analizar_timeframe(velas, estado_tf):
         "swing_high_idx": sh_idx,
         "swing_low_idx": sl_idx,
         "niveles_alertados": niveles,
+        "poc_history": poc_history,
+        "sh_history": sh_history,
+        "sl_history": sl_history,
         "ultimo_evento": evento["tipo"] if evento else estado_tf.get("ultimo_evento"),
         "ultimo_ts": ts_act,
         "macd_actual": round(macd[-1], 4) if macd else None,
@@ -364,8 +387,10 @@ def verificar_pending(pending, velas_tf, velas_5m):
     Verifica si el precio volvió al POC + cruce MACD en 5m → entrada.
 
     [FIX MULTI-TF] Bloquea el entry si el 5m ya cambió de dirección
-    contra el TF que detectó el CHoCH. Evita entrar cuando el 5m
-    ya está en la dirección contraria al pending.
+    contra el TF que detectó el CHoCH.
+
+    [FIX HISTÓRICOS] Bloquea el entry si hay SH/SL históricos
+    justo en la zona del POC.
     """
     if not pending or not velas_tf:
         return None
@@ -375,7 +400,7 @@ def verificar_pending(pending, velas_tf, velas_5m):
     precio = velas_tf[-1]["c"]
     pb, pt = pending["poc_btm"], pending["poc_top"]
 
-    # ¿Tocó la zona POC? Usamos velas de 5m para máxima precisión
+    # ¿Tocó la zona POC?
     fuente = velas_5m if velas_5m and len(velas_5m) >= 10 else velas_tf
     en_zona = False
     for v in fuente[-ENTRY_MACD_VENTANA - 1:]:
@@ -399,17 +424,41 @@ def verificar_pending(pending, velas_tf, velas_5m):
 
         d = pending["direccion"]
 
-        # Conflicto: pending SHORT pero el 5m ya está subiendo
         if d == "down" and direccion_5m == "up":
             print(f"      ⏭️ Bloqueado: pending SHORT pero 5m ya está UP", flush=True)
             return None
 
-        # Conflicto: pending LONG pero el 5m ya está bajando
         if d == "up" and direccion_5m == "down":
             print(f"      ⏭️ Bloqueado: pending LONG pero 5m ya está DOWN", flush=True)
             return None
 
-    # Cruce MACD en 5m (timing fino)
+    # [FIX HISTÓRICOS] Bloqueo por SH/SL históricos cerca del POC
+    d = pending["direccion"]
+    poc_precio = float(pending["poc_precio"])
+    sh_history = pending.get("sh_history", [])
+    sl_history = pending.get("sl_history", [])
+
+    def pct_dist(a, b):
+        try:
+            return abs(float(a) - float(b)) / float(b) * 100
+        except Exception:
+            return None
+
+    if d == "down":
+        for sh_hist in sh_history:
+            dist = pct_dist(sh_hist, poc_precio)
+            if dist is not None and dist <= HISTORICO_BLOQUEO_PCT:
+                print(f"      ⏭️ Bloqueado: SH histórico {sh_hist:.6f} bloquea SHORT (a {dist:.2f}%)", flush=True)
+                return None
+
+    if d == "up":
+        for sl_hist in sl_history:
+            dist = pct_dist(sl_hist, poc_precio)
+            if dist is not None and dist <= HISTORICO_BLOQUEO_PCT:
+                print(f"      ⏭️ Bloqueado: SL histórico {sl_hist:.6f} bloquea LONG (a {dist:.2f}%)", flush=True)
+                return None
+
+    # Cruce MACD en 5m
     cierres = [v["c"] for v in fuente]
     macd, _ = calcular_macd(cierres)
     cruce = cruce_macd_reciente(macd, ENTRY_MACD_VENTANA)
@@ -434,6 +483,35 @@ def fibo_activo_en_pending(pending, velas):
     if velas_desde < 0:
         return None
     return fibo_time_activo(velas, pending["fibo_zones"], velas_desde)
+
+
+# ============================================================
+# TELEGRAM
+# ============================================================
+
+def enviar_telegram(msg):
+    if not hora_permite_envio():
+        print("   ⏰ Fuera de horario. No se envía.", flush=True)
+        return False
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not token or not chat_id:
+        print("   ⚠️ Telegram no configurado.", flush=True)
+        return False
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    data = f"chat_id={urllib.parse.quote(str(chat_id))}&text={urllib.parse.quote(msg)}".encode("utf-8")
+    req = urllib.request.Request(
+        url, data=data,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return json.loads(r.read().decode("utf-8")).get("ok", False)
+    except Exception as e:
+        print(f"   ⚠️ Telegram error: {str(e)[:60]}", flush=True)
+        return False
+
 
 # ============================================================
 # ESTADO
@@ -460,10 +538,12 @@ def guardar_estado(estado):
 
 def main():
     print("\n" + "=" * 70, flush=True)
-    print("🏗️  STRUCTURE BOT — FASES 1-5", flush=True)
+    print("🏗️  STRUCTURE BOT V1 — FASES 1-5 + HISTÓRICOS", flush=True)
     print(f"   {len(SYMBOLS)} monedas | TF: {', '.join(TIMEFRAMES)}", flush=True)
     print(f"   POC bins={POC_BINS} | Entry ventana={ENTRY_MACD_VENTANA} | Expira={ENTRY_EXPIRA_HORAS}h", flush=True)
     print(f"   Fibo múltiplos: {FIBO_MULTIPLOS}", flush=True)
+    print(f"   Históricos: POC={MAX_POC_HISTORY} SH={MAX_SH_HISTORY} SL={MAX_SL_HISTORY}", flush=True)
+    print(f"   Bloqueo histórico: {HISTORICO_BLOQUEO_PCT}%", flush=True)
     print("=" * 70, flush=True)
     print(f"\nHora UTC: {datetime.now(timezone.utc).isoformat()}", flush=True)
 
@@ -505,7 +585,6 @@ def main():
                     print(f"   ⌛ {tf}: pending expirado", flush=True)
                     estado_tf["pending"] = None
 
-            # 2. Detectar CHoCH/BOS nuevos
             evento, pending_nuevo, nuevo_estado = analizar_timeframe(velas, estado_tf)
 
             if pending_nuevo:
