@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-STRUCTURE BOT V1 — Fases 1-5 + Históricos
+STRUCTURE BOT V1 — Fases 1-5 + Históricos + Trendlines
 - Fase 1: CHoCH / BOS (MACD sobre velas)
 - Fase 2: POC (Volume Profile del impulso)
-- Fase 3: Entry Sniper (retroceso al POC + cruce MACD 5m)
+- Fase 3: Entry Sniper (retroceso al POC/trendline + cruce MACD 5m)
 - Fase 4: Fibo Time (proyecciones temporales)
 - Fase 5: Multi-TF (contexto 15m y 1h)
 
@@ -12,9 +12,9 @@ Filtros:
 - Solo LONG si POC < precio actual
 - Solo SHORT si POC > precio actual
 - Filtro multi-TF (5m vs pending)
-- Filtro de históricos (POCs, SH, SL bloquean entradas)
+- Filtro de históricos (SH/SL bloquean entradas)
+- Trendline como nivel alternativo al POC
 - Dedup por nivel alertado
-- Ventana de 3 velas para eventos nuevos
 """
 
 import json
@@ -54,11 +54,14 @@ ENTRY_EXPIRA_HORAS = 4
 FIBO_MULTIPLOS = [3, 5, 8, 13, 21, 34]
 FIBO_TOLERANCIA_VELAS = 1
 
-# Históricos (filtros internos)
+# Históricos
 MAX_POC_HISTORY = 20
 MAX_SH_HISTORY = 10
 MAX_SL_HISTORY = 10
 HISTORICO_BLOQUEO_PCT = 0.50
+
+# Trendlines
+TRENDLINE_TOLERANCIA_PCT = 0.30
 
 DATA_DIR = Path("data")
 DATA_DIR.mkdir(exist_ok=True)
@@ -106,7 +109,6 @@ def ema(valores, span):
 
 
 def calcular_macd(cierres):
-    """Devuelve (macd, signal) como listas."""
     if len(cierres) < MACD_SLOW + 5:
         return [], []
     ef = ema(cierres, MACD_FAST)
@@ -134,7 +136,6 @@ def cruce_macd_reciente(macd, ventana=ENTRY_MACD_VENTANA):
 # ============================================================
 
 def calcular_poc(velas, idx_inicio, idx_fin, bins=POC_BINS):
-    """Calcula el POC del rango [idx_inicio, idx_fin]."""
     if idx_inicio < 0 or idx_fin >= len(velas) or idx_inicio >= idx_fin:
         return None
     rango = velas[idx_inicio:idx_fin + 1]
@@ -175,6 +176,46 @@ def calcular_poc(velas, idx_inicio, idx_fin, bins=POC_BINS):
         "poc_precio": (poc_b + poc_t) / 2,
         "rango_top": top,
         "rango_btm": bottom,
+    }
+
+
+# ============================================================
+# TRENDLINES
+# ============================================================
+
+def calcular_trendline_resistencia(sh_con_idx, idx_actual):
+    """Trendline conectando los 2 últimos swing highs."""
+    if not sh_con_idx or len(sh_con_idx) < 2:
+        return None
+    sh_1 = sh_con_idx[-2]
+    sh_2 = sh_con_idx[-1]
+    if sh_2["idx"] == sh_1["idx"]:
+        return None
+    pendiente = (sh_2["precio"] - sh_1["precio"]) / (sh_2["idx"] - sh_1["idx"])
+    precio_actual = sh_2["precio"] + pendiente * (idx_actual - sh_2["idx"])
+    return {
+        "precio": precio_actual,
+        "pendiente": pendiente,
+        "sh_1": sh_1,
+        "sh_2": sh_2,
+    }
+
+
+def calcular_trendline_soporte(sl_con_idx, idx_actual):
+    """Trendline conectando los 2 últimos swing lows."""
+    if not sl_con_idx or len(sl_con_idx) < 2:
+        return None
+    sl_1 = sl_con_idx[-2]
+    sl_2 = sl_con_idx[-1]
+    if sl_2["idx"] == sl_1["idx"]:
+        return None
+    pendiente = (sl_2["precio"] - sl_1["precio"]) / (sl_2["idx"] - sl_1["idx"])
+    precio_actual = sl_2["precio"] + pendiente * (idx_actual - sl_2["idx"])
+    return {
+        "precio": precio_actual,
+        "pendiente": pendiente,
+        "sl_1": sl_1,
+        "sl_2": sl_2,
     }
 
 
@@ -222,7 +263,6 @@ def ya_fue_alertado(nivel, niveles):
 
 
 def analizar_timeframe(velas, estado_tf):
-    """Detecta CHoCH/BOS y calcula POC + Fibo zones + acumula históricos."""
     if not velas or len(velas) < 40:
         return None, None, estado_tf
 
@@ -254,6 +294,8 @@ def analizar_timeframe(velas, estado_tf):
     poc_history = estado_tf.get("poc_history", [])
     sh_history = estado_tf.get("sh_history", [])
     sl_history = estado_tf.get("sl_history", [])
+    sh_con_idx = estado_tf.get("sh_con_idx", [])
+    sl_con_idx = estado_tf.get("sl_con_idx", [])
 
     # Detectar swings y acumular históricos
     for i in range(1, len(macd)):
@@ -267,6 +309,8 @@ def analizar_timeframe(velas, estado_tf):
                     sl_idx = idx
                     sl_history.append(nl)
                     sl_history = sl_history[-MAX_SL_HISTORY:]
+                    sl_con_idx.append({"precio": nl, "idx": idx})
+                    sl_con_idx = sl_con_idx[-MAX_SL_HISTORY:]
         if mp >= 0 and mn < 0:
             idx = i - 1
             if 0 <= idx < len(highs):
@@ -276,6 +320,8 @@ def analizar_timeframe(velas, estado_tf):
                     sh_idx = idx
                     sh_history.append(nh)
                     sh_history = sh_history[-MAX_SH_HISTORY:]
+                    sh_con_idx.append({"precio": nh, "idx": idx})
+                    sh_con_idx = sh_con_idx[-MAX_SH_HISTORY:]
 
     cierre = cierres[-1]
     ts_act = ts[-1]
@@ -301,6 +347,7 @@ def analizar_timeframe(velas, estado_tf):
 
                     if poc["poc_precio"] < cierre:
                         fibo_zones = calcular_fibo_zones(len(velas) - 1, sl_idx, ts_act)
+                        trendline_sup = calcular_trendline_soporte(sl_con_idx, len(velas) - 1)
                         pending = {
                             "tipo": tipo, "direccion": "up",
                             "creado_ts": ts_act,
@@ -310,6 +357,7 @@ def analizar_timeframe(velas, estado_tf):
                             "poc_history": list(poc_history),
                             "sh_history": list(sh_history),
                             "sl_history": list(sl_history),
+                            "trendline_alternativo": trendline_sup,
                             **poc,
                         }
                     else:
@@ -338,6 +386,7 @@ def analizar_timeframe(velas, estado_tf):
 
                     if poc["poc_precio"] > cierre:
                         fibo_zones = calcular_fibo_zones(len(velas) - 1, sh_idx, ts_act)
+                        trendline_res = calcular_trendline_resistencia(sh_con_idx, len(velas) - 1)
                         pending = {
                             "tipo": tipo, "direccion": "down",
                             "creado_ts": ts_act,
@@ -347,6 +396,7 @@ def analizar_timeframe(velas, estado_tf):
                             "poc_history": list(poc_history),
                             "sh_history": list(sh_history),
                             "sl_history": list(sl_history),
+                            "trendline_alternativo": trendline_res,
                             **poc,
                         }
                     else:
@@ -366,6 +416,8 @@ def analizar_timeframe(velas, estado_tf):
         "poc_history": poc_history,
         "sh_history": sh_history,
         "sl_history": sl_history,
+        "sh_con_idx": sh_con_idx,
+        "sl_con_idx": sl_con_idx,
         "ultimo_evento": evento["tipo"] if evento else estado_tf.get("ultimo_evento"),
         "ultimo_ts": ts_act,
         "macd_actual": round(macd[-1], 4) if macd else None,
@@ -384,13 +436,7 @@ def analizar_timeframe(velas, estado_tf):
 
 def verificar_pending(pending, velas_tf, velas_5m):
     """
-    Verifica si el precio volvió al POC + cruce MACD en 5m → entrada.
-
-    [FIX MULTI-TF] Bloquea el entry si el 5m ya cambió de dirección
-    contra el TF que detectó el CHoCH.
-
-    [FIX HISTÓRICOS] Bloquea el entry si hay SH/SL históricos
-    justo en la zona del POC.
+    Verifica si el precio tocó el POC O la trendline + cruce MACD 5m.
     """
     if not pending or not velas_tf:
         return None
@@ -400,13 +446,28 @@ def verificar_pending(pending, velas_tf, velas_5m):
     precio = velas_tf[-1]["c"]
     pb, pt = pending["poc_btm"], pending["poc_top"]
 
-    # ¿Tocó la zona POC?
     fuente = velas_5m if velas_5m and len(velas_5m) >= 10 else velas_tf
+
+    # 1. Verificar toque al POC
     en_zona = False
+    zona_usada = "poc"
     for v in fuente[-ENTRY_MACD_VENTANA - 1:]:
         if v["l"] <= pt and v["h"] >= pb:
             en_zona = True
             break
+
+    # 2. Si no tocó POC, verificar trendline alternativa
+    if not en_zona:
+        tl = pending.get("trendline_alternativo")
+        if tl:
+            tl_precio = tl["precio"]
+            for v in fuente[-ENTRY_MACD_VENTANA - 1:]:
+                dist = abs(v["c"] - tl_precio) / tl_precio * 100
+                if dist <= TRENDLINE_TOLERANCIA_PCT:
+                    en_zona = True
+                    zona_usada = "trendline"
+                    break
+
     if not en_zona:
         return None
 
@@ -467,14 +528,17 @@ def verificar_pending(pending, velas_tf, velas_5m):
 
     d = pending["direccion"]
     if d == "up" and cruce == "up":
+        if zona_usada == "trendline":
+            return "ENTRY LONG_TL"
         return "ENTRY LONG"
     if d == "down" and cruce == "down":
+        if zona_usada == "trendline":
+            return "ENTRY SHORT_TL"
         return "ENTRY SHORT"
     return None
 
 
 def fibo_activo_en_pending(pending, velas):
-    """Devuelve el multiplicador Fibo activo, si lo hay."""
     if not pending or "fibo_zones" not in pending:
         return None
     idx_choch = pending.get("idx_choch", 0)
@@ -538,12 +602,12 @@ def guardar_estado(estado):
 
 def main():
     print("\n" + "=" * 70, flush=True)
-    print("🏗️  STRUCTURE BOT V1 — FASES 1-5 + HISTÓRICOS", flush=True)
+    print("🏗️  STRUCTURE BOT V1 — FASES 1-5 + HISTÓRICOS + TRENDLINES", flush=True)
     print(f"   {len(SYMBOLS)} monedas | TF: {', '.join(TIMEFRAMES)}", flush=True)
     print(f"   POC bins={POC_BINS} | Entry ventana={ENTRY_MACD_VENTANA} | Expira={ENTRY_EXPIRA_HORAS}h", flush=True)
     print(f"   Fibo múltiplos: {FIBO_MULTIPLOS}", flush=True)
     print(f"   Históricos: POC={MAX_POC_HISTORY} SH={MAX_SH_HISTORY} SL={MAX_SL_HISTORY}", flush=True)
-    print(f"   Bloqueo histórico: {HISTORICO_BLOQUEO_PCT}%", flush=True)
+    print(f"   Bloqueo histórico: {HISTORICO_BLOQUEO_PCT}% | Trendline tol: {TRENDLINE_TOLERANCIA_PCT}%", flush=True)
     print("=" * 70, flush=True)
     print(f"\nHora UTC: {datetime.now(timezone.utc).isoformat()}", flush=True)
 
@@ -571,7 +635,7 @@ def main():
             if pend_actual:
                 velas_5m = cache.get("velas_5m", [])
                 señal = verificar_pending(pend_actual, velas, velas_5m)
-                if señal in ("ENTRY LONG", "ENTRY SHORT"):
+                if señal in ("ENTRY LONG", "ENTRY SHORT", "ENTRY LONG_TL", "ENTRY SHORT_TL"):
                     fibo_mult = fibo_activo_en_pending(pend_actual, velas)
                     entries.append({
                         "symbol": symbol, "tf": tf,
@@ -589,7 +653,7 @@ def main():
 
             if pending_nuevo:
                 nuevo_estado["pending"] = pending_nuevo
-            elif estado_tf.get("pending"):
+            elif estado_tf.get("pending") and not evento:
                 nuevo_estado["pending"] = estado_tf["pending"]
 
             estado_global[clave] = nuevo_estado
@@ -603,7 +667,9 @@ def main():
             sl_s = f"SL={sl:.6f}" if sl else "SL=—"
             pend_s = ""
             if pend:
-                pend_s = f" | ⏳PEND[{pend['direccion']} POC={pend['poc_precio']:.6f}]"
+                tl = pend.get("trendline_alternativo")
+                tl_txt = f" TL={tl['precio']:.6f}" if tl else ""
+                pend_s = f" | ⏳PEND[{pend['direccion']} POC={pend['poc_precio']:.6f}{tl_txt}]"
 
             if evento:
                 print(f"   ⚡ {tf} | {evento['tipo']} en {evento['nivel_roto']:.6f} "
@@ -611,6 +677,9 @@ def main():
                 if pending_nuevo:
                     print(f"      → POC: {pending_nuevo['poc_precio']:.6f} "
                           f"[{pending_nuevo['poc_btm']:.6f}–{pending_nuevo['poc_top']:.6f}]", flush=True)
+                    tl = pending_nuevo.get("trendline_alternativo")
+                    if tl:
+                        print(f"      → Trendline: {tl['precio']:.6f} (pendiente {tl['pendiente']:+.6f})", flush=True)
                     fibo_txt = ", ".join([f"{fz['mult']}×({fz['distancia_velas']}v)" for fz in pending_nuevo.get("fibo_zones", [])[:3]])
                     print(f"      → Fibo zones: {fibo_txt}", flush=True)
                 eventos.append({"symbol": symbol, "tf": tf, "evento": evento,
@@ -637,6 +706,9 @@ def main():
             p = ev["pending"]
             msg += (f"📊 POC: ${p['poc_precio']:.6f}\n"
                     f"   Zona: ${p['poc_btm']:.6f} – ${p['poc_top']:.6f}\n")
+            tl = p.get("trendline_alternativo")
+            if tl:
+                msg += f"📐 Trendline: ${tl['precio']:.6f}\n"
             fibo_list = p.get("fibo_zones", [])
             if fibo_list:
                 fibo_txt = ", ".join([f"{fz['mult']}×" for fz in fibo_list[:3]])
@@ -644,24 +716,34 @@ def main():
             msg += f"   ⏳ Esperando retroceso + MACD\n"
         msg += f"⏱️ {tf}\n🕐 {now_lima}\n━━━━━━━━━━━━━━━━━━━"
         print(f"\n{msg}", flush=True)
-        # enviar_telegram(msg)  # ← DESACTIVADO: solo log, no Telegram
+        # enviar_telegram(msg)  # DESACTIVADO
 
     # 2. ENTRADAS (señal real) — SÍ Telegram
     for en in entries:
         s, tf = en["symbol"], en["tf"]
         p, precio, tipo = en["pending"], en["precio"], en["señal"]
-        icono = "🟢" if tipo == "ENTRY LONG" else "🔴"
-        accion = "COMPRA" if tipo == "ENTRY LONG" else "VENTA"
+        es_long = tipo in ("ENTRY LONG", "ENTRY LONG_TL")
+        es_trendline = tipo in ("ENTRY LONG_TL", "ENTRY SHORT_TL")
+        icono = "🟢" if es_long else "🔴"
+        accion = "COMPRA" if es_long else "VENTA"
+
         msg = (f"🎯 STRUCTURE BOT V1\n"
                f"¡{accion} {s}!\n"
-               f"{icono} {tipo}\n"
+               f"{icono} {tipo.replace('_TL', '')}\n"
                f"📈 Precio actual: ${precio:.6f}\n"
                f"🎯 POC: ${p['poc_precio']:.6f}\n"
-               f"   Zona: ${p['poc_btm']:.6f} – ${p['poc_top']:.6f}\n"
-               f"📊 Origen: {p['tipo']} ({tf})\n")
+               f"   Zona: ${p['poc_btm']:.6f} – ${p['poc_top']:.6f}\n")
+
+        if es_trendline:
+            tl = p.get("trendline_alternativo")
+            if tl:
+                msg += f"📐 Trendline: ${tl['precio']:.6f}\n"
+                msg += f"📐 Disparo por trendline (POC no respetado)\n"
+
+        msg += f"📊 Origen: {p['tipo']} ({tf})\n"
         if en.get("fibo_mult"):
             msg += f"📅 Fibo Time: {en['fibo_mult']}× ACTIVO\n"
-        msg += (f"✅ Retroceso al POC + MACD confirmado\n"
+        msg += (f"✅ Retroceso + MACD confirmado\n"
                 f"🕐 {now_lima}\n━━━━━━━━━━━━━━━━━━━")
         print(f"\n{msg}", flush=True)
         if enviar_telegram(msg):
