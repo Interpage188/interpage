@@ -15,10 +15,11 @@ from pathlib import Path
 # Solo:
 #   1. Lee data/pending_levels.json (lo que multi.py publicó)
 #   2. Lee el precio del cache del recolector
-#   3. Compara y avisa por Telegram:
-#      - POR TOCAR: precio se acercó (≤0.5%)
-#      - TOCÓ: precio llegó (≤0.15% o mecha)
+#   3. Compara y avisa por Telegram cuando TOCA (≤0.15% o mecha)
 #   4. Expira si se aleja >1.5% o pasa 24h
+#
+# [CAMBIO] Eliminado el aviso previo "POR TOCAR". Solo se envía
+#          alerta cuando el nivel se toca realmente.
 # ============================================================
 
 DATA_DIR = Path("data")
@@ -26,7 +27,6 @@ CACHE_DIR = DATA_DIR / "cache"
 PENDING_FILE = DATA_DIR / "pending_levels.json"
 
 TOQUE_PCT = 0.15
-CERCA_PCT = 0.50
 EXPIRACION_PCT = 1.5
 MAX_HORAS_VIGENCIA = 24
 
@@ -108,7 +108,6 @@ def main():
     print(f"📋 {len(levels)} niveles pendientes", flush=True)
 
     tocados = 0
-    por_tocar = 0
     expirados = 0
     esperando = 0
 
@@ -194,30 +193,9 @@ def main():
             tocados += 1
             continue
 
-        if (dist_abs <= CERCA_PCT
-            and distancia_emision > CERCA_PCT
-            and not item.get("aviso_por_tocar")):
-            print(f"🟡 {symbol}: POR TOCAR — {dist_abs:.2f}% del nivel", flush=True)
-
-            emoji = "🟢" if direccion == "LONG" else "🔴"
-            accion = "COMPRA" if direccion == "LONG" else "VENDE"
-
-            msg = (
-                f"{emoji} {accion} {symbol} ⚠️ POR TOCAR\n"
-                f"📈 Precio: ${precio:.6f}\n"
-                f"📐 Nivel: ${nivel:.6f} ({tf})\n"
-                f"🎯 Score: {score:.1f} | {touch}T\n"
-                f"🔮 SuperTrend: {st_sym_str}\n"
-                f"📊 Distancia: {dist_abs:.2f}%\n"
-                f"💡 Prepara entrada\n"
-                f"🕐 {hora_lima_dt.strftime('%H:%M')} Lima"
-            )
-            enviar_telegram(msg)
-
-            item["aviso_por_tocar"] = True
-            item["aviso_por_tocar_en"] = ahora.isoformat()
-            por_tocar += 1
-            continue
+        # [QUITADO] Bloque "POR TOCAR" eliminado
+        # Antes enviaba aviso previo cuando el precio se acercaba ≤0.5%
+        # Ahora solo se envía cuando el nivel se toca realmente
 
         if dist_abs > EXPIRACION_PCT and distancia_emision <= EXPIRACION_PCT:
             item["estado"] = "expirado"
@@ -232,7 +210,7 @@ def main():
     guardar_json(PENDING_FILE, levels)
 
     print("=" * 70, flush=True)
-    print(f"📊 RESULTADO: {esperando} activos | {tocados} tocados | {por_tocar} por tocar | {expirados} expirados", flush=True)
+    print(f"📊 RESULTADO: {esperando} activos | {tocados} tocados | {expirados} expirados", flush=True)
     print("🏁 WATCHER TERMINADO", flush=True)
 
 
