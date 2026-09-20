@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-STRUCTURE BOT V1 — Fases 1-5 + Históricos + Trendlines
+STRUCTURE BOT V1 — Replica del script original + filtros añadidos
 - Fase 1: CHoCH / BOS (MACD sobre velas)
 - Fase 2: POC (Volume Profile del impulso)
-- Fase 3: Entry Sniper (retroceso al POC/trendline + cruce MACD 5m)
+- Fase 3: Entry Sniper (retroceso al POC + cruce MACD 5m)
 - Fase 4: Fibo Time (proyecciones temporales)
 - Fase 5: Multi-TF (contexto 15m y 1h)
 
-Filtros:
-- Solo LONG si POC < precio actual
-- Solo SHORT si POC > precio actual
-- Filtro multi-TF (5m vs pending)
-- Filtro de históricos (SH/SL bloquean entradas)
-- Trendline como nivel alternativo al POC
-- Dedup por nivel alertado
+Replica del script original:
+- Solo POC como nivel de entry (trendlines solo informativas)
+- Sin expiración (el POC vive hasta nuevo CHoCH)
+- Una señal por zona (entry_given)
+- Anti-huérfanos: nuevo CHoCH reemplaza el pending anterior
+
+Filtros añadidos:
+- Filtro 5m: bloquea si el 5m va contra el pending
+- Filtro históricos: bloquea si SH/SL histórico cerca del POC
 """
 
 import json
@@ -48,7 +50,7 @@ MAX_NIVELES_GUARDADOS = 20
 # POC
 POC_BINS = 24
 ENTRY_MACD_VENTANA = 3
-ENTRY_EXPIRA_HORAS = 4
+# [SCRIPT] Sin expiración — el POC vive hasta nuevo CHoCH
 
 # Fibo Time
 FIBO_MULTIPLOS = [3, 5, 8, 13, 21, 34]
@@ -180,11 +182,10 @@ def calcular_poc(velas, idx_inicio, idx_fin, bins=POC_BINS):
 
 
 # ============================================================
-# TRENDLINES
+# TRENDLINES (informativas)
 # ============================================================
 
 def calcular_trendline_resistencia(sh_con_idx, idx_actual):
-    """Trendline conectando los 2 últimos swing highs."""
     if not sh_con_idx or len(sh_con_idx) < 2:
         return None
     sh_1 = sh_con_idx[-2]
@@ -202,7 +203,6 @@ def calcular_trendline_resistencia(sh_con_idx, idx_actual):
 
 
 def calcular_trendline_soporte(sl_con_idx, idx_actual):
-    """Trendline conectando los 2 últimos swing lows."""
     if not sl_con_idx or len(sl_con_idx) < 2:
         return None
     sl_1 = sl_con_idx[-2]
@@ -351,7 +351,6 @@ def analizar_timeframe(velas, estado_tf):
                         pending = {
                             "tipo": tipo, "direccion": "up",
                             "creado_ts": ts_act,
-                            "expira_ts": ts_act + ENTRY_EXPIRA_HORAS * 3600 * 1000,
                             "idx_choch": len(velas) - 1,
                             "fibo_zones": fibo_zones,
                             "poc_history": list(poc_history),
@@ -390,7 +389,6 @@ def analizar_timeframe(velas, estado_tf):
                         pending = {
                             "tipo": tipo, "direccion": "down",
                             "creado_ts": ts_act,
-                            "expira_ts": ts_act + ENTRY_EXPIRA_HORAS * 3600 * 1000,
                             "idx_choch": len(velas) - 1,
                             "fibo_zones": fibo_zones,
                             "poc_history": list(poc_history),
@@ -431,47 +429,42 @@ def analizar_timeframe(velas, estado_tf):
 
 
 # ============================================================
-# VERIFICACIÓN DE ENTRY
+# VERIFICACIÓN DE ENTRY (replica del script original)
 # ============================================================
 
 def verificar_pending(pending, velas_tf, velas_5m):
     """
-    Verifica si el precio tocó el POC O la trendline + cruce MACD 5m.
+    Replica del script original:
+      - Solo POC como nivel de entry
+      - Sin expiración
+      - Una señal por zona (entry_given)
+
+    Filtros añadidos:
+      - Filtro 5m: bloquea si el 5m va contra el pending
+      - Filtro históricos: bloquea si SH/SL histórico cerca del POC
     """
     if not pending or not velas_tf:
         return None
-    if velas_tf[-1]["ts"] > pending.get("expira_ts", 0):
-        return "EXPIRADO"
 
-    precio = velas_tf[-1]["c"]
+    # [SCRIPT] Una señal por zona
+    if pending.get("entry_given"):
+        return None
+
     pb, pt = pending["poc_btm"], pending["poc_top"]
 
     fuente = velas_5m if velas_5m and len(velas_5m) >= 10 else velas_tf
 
-    # 1. Verificar toque al POC
+    # Verificar toque al POC (solo POC, como el script original)
     en_zona = False
-    zona_usada = "poc"
     for v in fuente[-ENTRY_MACD_VENTANA - 1:]:
         if v["l"] <= pt and v["h"] >= pb:
             en_zona = True
             break
 
-    # 2. Si no tocó POC, verificar trendline alternativa
-    if not en_zona:
-        tl = pending.get("trendline_alternativo")
-        if tl:
-            tl_precio = tl["precio"]
-            for v in fuente[-ENTRY_MACD_VENTANA - 1:]:
-                dist = abs(v["c"] - tl_precio) / tl_precio * 100
-                if dist <= TRENDLINE_TOLERANCIA_PCT:
-                    en_zona = True
-                    zona_usada = "trendline"
-                    break
-
     if not en_zona:
         return None
 
-    # [FIX MULTI-TF] Verificar dirección del 5m
+    # [FIX 5m] Bloquea si el 5m va contra el pending
     if velas_5m and len(velas_5m) >= 2:
         cierre_5m_actual = float(velas_5m[-1]["c"])
         cierre_5m_previo = float(velas_5m[-2]["c"])
@@ -528,12 +521,8 @@ def verificar_pending(pending, velas_tf, velas_5m):
 
     d = pending["direccion"]
     if d == "up" and cruce == "up":
-        if zona_usada == "trendline":
-            return "ENTRY LONG_TL"
         return "ENTRY LONG"
     if d == "down" and cruce == "down":
-        if zona_usada == "trendline":
-            return "ENTRY SHORT_TL"
         return "ENTRY SHORT"
     return None
 
@@ -602,19 +591,18 @@ def guardar_estado(estado):
 
 def main():
     print("\n" + "=" * 70, flush=True)
-    print("🏗️  STRUCTURE BOT V1 — FASES 1-5 + HISTÓRICOS + TRENDLINES", flush=True)
+    print("🏗️  STRUCTURE BOT V1 — REPLICA SCRIPT + FILTROS", flush=True)
     print(f"   {len(SYMBOLS)} monedas | TF: {', '.join(TIMEFRAMES)}", flush=True)
-    print(f"   POC bins={POC_BINS} | Entry ventana={ENTRY_MACD_VENTANA} | Expira={ENTRY_EXPIRA_HORAS}h", flush=True)
+    print(f"   POC bins={POC_BINS} | Entry ventana={ENTRY_MACD_VENTANA} | Sin expiración", flush=True)
     print(f"   Fibo múltiplos: {FIBO_MULTIPLOS}", flush=True)
     print(f"   Históricos: POC={MAX_POC_HISTORY} SH={MAX_SH_HISTORY} SL={MAX_SL_HISTORY}", flush=True)
-    print(f"   Bloqueo histórico: {HISTORICO_BLOQUEO_PCT}% | Trendline tol: {TRENDLINE_TOLERANCIA_PCT}%", flush=True)
+    print(f"   Bloqueo histórico: {HISTORICO_BLOQUEO_PCT}%", flush=True)
     print("=" * 70, flush=True)
     print(f"\nHora UTC: {datetime.now(timezone.utc).isoformat()}", flush=True)
 
     estado_global = cargar_estado()
     eventos = []
     entries = []
-    expirados = []
 
     for symbol in SYMBOLS:
         print(f"\n🔍 {symbol}", flush=True)
@@ -631,11 +619,12 @@ def main():
             clave = f"{symbol}_{tf}"
             estado_tf = estado_global.get(clave, {})
 
+            # Verificar pending existente
             pend_actual = estado_tf.get("pending")
             if pend_actual:
                 velas_5m = cache.get("velas_5m", [])
                 señal = verificar_pending(pend_actual, velas, velas_5m)
-                if señal in ("ENTRY LONG", "ENTRY SHORT", "ENTRY LONG_TL", "ENTRY SHORT_TL"):
+                if señal in ("ENTRY LONG", "ENTRY SHORT"):
                     fibo_mult = fibo_activo_en_pending(pend_actual, velas)
                     entries.append({
                         "symbol": symbol, "tf": tf,
@@ -643,18 +632,22 @@ def main():
                         "precio": velas[-1]["c"],
                         "fibo_mult": fibo_mult,
                     })
-                    estado_tf["pending"] = None
-                elif señal == "EXPIRADO":
-                    expirados.append({"symbol": symbol, "tf": tf})
-                    print(f"   ⌛ {tf}: pending expirado", flush=True)
-                    estado_tf["pending"] = None
+                    # [SCRIPT] Marcar como disparado, no eliminar pending
+                    pend_actual["entry_given"] = True
+                    estado_tf["pending"] = pend_actual
 
+            # Detectar CHoCH/BOS nuevos
             evento, pending_nuevo, nuevo_estado = analizar_timeframe(velas, estado_tf)
 
+            # [SCRIPT + ANTI-HUÉRFANOS]
+            # Nuevo CHoCH con POC válido → reemplaza el pending
+            # Nuevo CHoCH sin POC válido → descarta el pending viejo
+            # Sin CHoCH → conserva el pending
             if pending_nuevo:
                 nuevo_estado["pending"] = pending_nuevo
             elif estado_tf.get("pending") and not evento:
                 nuevo_estado["pending"] = estado_tf["pending"]
+            # Si hubo evento sin pending_nuevo → descarta el pending viejo
 
             estado_global[clave] = nuevo_estado
 
@@ -669,7 +662,8 @@ def main():
             if pend:
                 tl = pend.get("trendline_alternativo")
                 tl_txt = f" TL={tl['precio']:.6f}" if tl else ""
-                pend_s = f" | ⏳PEND[{pend['direccion']} POC={pend['poc_precio']:.6f}{tl_txt}]"
+                disparado = " ✓DISPARADO" if pend.get("entry_given") else ""
+                pend_s = f" | ⏳PEND[{pend['direccion']} POC={pend['poc_precio']:.6f}{tl_txt}{disparado}]"
 
             if evento:
                 print(f"   ⚡ {tf} | {evento['tipo']} en {evento['nivel_roto']:.6f} "
@@ -679,7 +673,7 @@ def main():
                           f"[{pending_nuevo['poc_btm']:.6f}–{pending_nuevo['poc_top']:.6f}]", flush=True)
                     tl = pending_nuevo.get("trendline_alternativo")
                     if tl:
-                        print(f"      → Trendline: {tl['precio']:.6f} (pendiente {tl['pendiente']:+.6f})", flush=True)
+                        print(f"      → Trendline: {tl['precio']:.6f} (info, no entry)", flush=True)
                     fibo_txt = ", ".join([f"{fz['mult']}×({fz['distancia_velas']}v)" for fz in pending_nuevo.get("fibo_zones", [])[:3]])
                     print(f"      → Fibo zones: {fibo_txt}", flush=True)
                 eventos.append({"symbol": symbol, "tf": tf, "evento": evento,
@@ -708,7 +702,7 @@ def main():
                     f"   Zona: ${p['poc_btm']:.6f} – ${p['poc_top']:.6f}\n")
             tl = p.get("trendline_alternativo")
             if tl:
-                msg += f"📐 Trendline: ${tl['precio']:.6f}\n"
+                msg += f"📐 Trendline: ${tl['precio']:.6f} (info)\n"
             fibo_list = p.get("fibo_zones", [])
             if fibo_list:
                 fibo_txt = ", ".join([f"{fz['mult']}×" for fz in fibo_list[:3]])
@@ -716,34 +710,24 @@ def main():
             msg += f"   ⏳ Esperando retroceso + MACD\n"
         msg += f"⏱️ {tf}\n🕐 {now_lima}\n━━━━━━━━━━━━━━━━━━━"
         print(f"\n{msg}", flush=True)
-        # enviar_telegram(msg)  # DESACTIVADO
+        # enviar_telegram(msg)  # DESACTIVADO: solo log
 
     # 2. ENTRADAS (señal real) — SÍ Telegram
     for en in entries:
         s, tf = en["symbol"], en["tf"]
         p, precio, tipo = en["pending"], en["precio"], en["señal"]
-        es_long = tipo in ("ENTRY LONG", "ENTRY LONG_TL")
-        es_trendline = tipo in ("ENTRY LONG_TL", "ENTRY SHORT_TL")
-        icono = "🟢" if es_long else "🔴"
-        accion = "COMPRA" if es_long else "VENTA"
-
+        icono = "🟢" if tipo == "ENTRY LONG" else "🔴"
+        accion = "COMPRA" if tipo == "ENTRY LONG" else "VENTA"
         msg = (f"🎯 STRUCTURE BOT V1\n"
                f"¡{accion} {s}!\n"
-               f"{icono} {tipo.replace('_TL', '')}\n"
+               f"{icono} {tipo}\n"
                f"📈 Precio actual: ${precio:.6f}\n"
                f"🎯 POC: ${p['poc_precio']:.6f}\n"
-               f"   Zona: ${p['poc_btm']:.6f} – ${p['poc_top']:.6f}\n")
-
-        if es_trendline:
-            tl = p.get("trendline_alternativo")
-            if tl:
-                msg += f"📐 Trendline: ${tl['precio']:.6f}\n"
-                msg += f"📐 Disparo por trendline (POC no respetado)\n"
-
-        msg += f"📊 Origen: {p['tipo']} ({tf})\n"
+               f"   Zona: ${p['poc_btm']:.6f} – ${p['poc_top']:.6f}\n"
+               f"📊 Origen: {p['tipo']} ({tf})\n")
         if en.get("fibo_mult"):
             msg += f"📅 Fibo Time: {en['fibo_mult']}× ACTIVO\n"
-        msg += (f"✅ Retroceso + MACD confirmado\n"
+        msg += (f"✅ Retroceso al POC + MACD confirmado\n"
                 f"🕐 {now_lima}\n━━━━━━━━━━━━━━━━━━━")
         print(f"\n{msg}", flush=True)
         if enviar_telegram(msg):
@@ -754,7 +738,6 @@ def main():
     print("\n" + "=" * 70, flush=True)
     print(f"CHoCH/BOS nuevos: {len(eventos)}", flush=True)
     print(f"🎯 ENTRADAS: {len(entries)}", flush=True)
-    print(f"⌛ Expirados: {len(expirados)}", flush=True)
     print(f"💾 Estado: {STATE_FILE.name}", flush=True)
     print("🏁 PROGRAMA TERMINADO", flush=True)
 
