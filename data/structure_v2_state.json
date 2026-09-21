@@ -415,54 +415,14 @@
     "high_5": 7.929,
     "low_5": 7.786,
     "actualizado": "2026-09-21T13:54:53.326033+00:00",
-    "pending": {
-      "version": "V2.1",
-      "tipo": "BOS ALCISTA",
-      "direccion": "up",
-      "creado_ts": 1789998300000,
-      "expira_ts": 1790012700000,
-      "idx_evento": 99,
-      "idx_swing": 77,
-      "nivel_roto": 7.887,
-      "fibo_zones": [
-        {
-          "mult": 3,
-          "distancia_velas": 66,
-          "idx": 165
-        },
-        {
-          "mult": 5,
-          "distancia_velas": 110,
-          "idx": 209
-        },
-        {
-          "mult": 8,
-          "distancia_velas": 176,
-          "idx": 275
-        },
-        {
-          "mult": 13,
-          "distancia_velas": 286,
-          "idx": 385
-        },
-        {
-          "mult": 21,
-          "distancia_velas": 462,
-          "idx": 561
-        },
-        {
-          "mult": 34,
-          "distancia_velas": 748,
-          "idx": 847
-        }
-      ],
-      "poc_precio": 7.844354166666667,
-      "poc_btm": 7.838583333333333,
-      "poc_top": 7.850125,
-      "rango_top": 7.954,
-      "rango_btm": 7.677,
-      "poc_volumen": 17633.03261809524
-    }
+    "pending": null,
+    "entradas": [
+      {
+        "ts": 1789998300000,
+        "señal": "ENTRY LONG",
+        "poc": 7.844354166666667
+      }
+    ]
   },
   "INJ_1h": {
     "version": "V2.1",
