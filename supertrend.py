@@ -6,14 +6,10 @@
 # NO decide. NO alerta. Solo escribe data/supertrend_state.json
 # para que multi.py lo lea como señal de confirmación.
 #
-# Replica:
-#   - pivothigh(prd, prd) / pivotlow(prd, prd)
-#   - center = (center * 2 + lastpp) / 3
-#   - Up/Dn = center ± Factor * ATR(Pd)
-#   - TUp/TDown stateful + Trend
-#
-# Vive en el repo público (Interpage188/interpage) junto al
-# recolector y el watcher.
+# [ACTUALIZACIÓN] Ahora genera 5m Y 15m.
+#   - trend      : 15m (compatibilidad con código existente)
+#   - trend_5m   : 5m (nuevo)
+#   - trend_15m  : 15m (explícito)
 # ============================================================
 
 import json
@@ -27,10 +23,13 @@ PRD = 2            # Pivot Point Period
 FACTOR = 3.0       # ATR Factor
 ATR_PERIOD = 10    # ATR Period
 
+# ===== TIMEFRAMES =====
+TIMEFRAMES = ["5m", "15m"]
+OKX_BAR_MAP = {"5m": "5m", "15m": "15m"}
+
 # ===== OKX =====
 OKX_BASE = "https://www.okx.com/api/v5/market/candles"
-OKX_BAR = "15m"
-OKX_LIMIT = 200    # ~50h de velas
+OKX_LIMIT = 200    # ~16h de velas 5m / ~50h de 15m
 
 # Mismo set que el recolector (17 monedas, incluye BTC)
 SYMBOLS = [
@@ -88,7 +87,7 @@ def atr_wilder(candles, period=10):
     for i in range(n):
         prev_close = candles[i - 1]["close"] if i > 0 else None
         trs[i] = true_range(prev_close, candles[i]["high"], candles[i]["low"])
-    first_idx = period  # último índice del primer SMA
+    first_idx = period
     if first_idx >= n:
         return atr
     atr[first_idx] = sum(trs[1:1 + period]) / period
@@ -173,7 +172,6 @@ def calcular_supertrend(candles):
     trend = None
 
     for i in range(n):
-        # center line
         lastpp = None
         if ph_arr[i] is not None:
             lastpp = ph_arr[i]
@@ -193,7 +191,6 @@ def calcular_supertrend(candles):
         prev_tup = tup_arr[i - 1] if i > 0 else None
         prev_tdown = tdown_arr[i - 1] if i > 0 else None
 
-        # TUp / TDown (stateful)
         if up is not None:
             if prev_close is not None and prev_tup is not None and prev_close > prev_tup:
                 tup = max(up, prev_tup)
@@ -208,19 +205,17 @@ def calcular_supertrend(candles):
                 tdown = dn
         tdown_arr[i] = tdown
 
-        # Trend
         close = candles[i]["close"]
         if prev_tdown is not None and close > prev_tdown:
             trend = 1
         elif prev_tup is not None and close < prev_tup:
             trend = -1
         elif trend is None:
-            trend = 1  # nz(Trend[1], 1)
+            trend = 1
         trend_arr[i] = trend
 
         trail_arr[i] = tup if trend == 1 else tdown
 
-    # Último flip
     ultimo_flip_idx = None
     for i in range(1, n):
         if trend_arr[i] is not None and trend_arr[i - 1] is not None:
@@ -254,49 +249,80 @@ def ts_to_iso(ts_ms):
 
 def main():
     print("=" * 70, flush=True)
-    print(f"🔮 SUPERTREND (Pivot Point) — PRD={PRD} Factor={FACTOR} ATR={ATR_PERIOD} @ {OKX_BAR}", flush=True)
+    print(f"🔮 SUPERTREND (Pivot Point) — PRD={PRD} Factor={FACTOR} ATR={ATR_PERIOD}",
+          flush=True)
+    print(f"   Timeframes: {', '.join(TIMEFRAMES)}", flush=True)
     print(f"   {datetime.now(timezone.utc).isoformat()}", flush=True)
     print("=" * 70, flush=True)
 
     estado = {
         "generado_en": datetime.now(timezone.utc).isoformat(),
-        "timeframe": OKX_BAR,
+        "timeframes": TIMEFRAMES,
         "config": {"prd": PRD, "factor": FACTOR, "atr_period": ATR_PERIOD},
         "symbols": {},
     }
 
     for symbol in SYMBOLS:
-        try:
-            candles = fetch_okx_candles(symbol, OKX_BAR, OKX_LIMIT)
-            st = calcular_supertrend(candles)
-            if not st:
-                print(f"   ⚠️ {symbol}: datos insuficientes", flush=True)
-                estado["symbols"][symbol] = {"trend": "N/A", "error": "datos insuficientes"}
-                continue
+        symbol_data = {}
+        for tf in TIMEFRAMES:
+            bar = OKX_BAR_MAP[tf]
+            try:
+                candles = fetch_okx_candles(symbol, bar, OKX_LIMIT)
+                st = calcular_supertrend(candles)
+                if not st:
+                    print(f"   ⚠️ {symbol} {tf}: datos insuficientes", flush=True)
+                    symbol_data[f"trend_{tf}"] = "N/A"
+                    symbol_data[f"error_{tf}"] = "datos insuficientes"
+                    continue
 
-            estado["symbols"][symbol] = {
-                "trend": st["trend"],
-                "señal_ultima_barra": st["señal_ultima_barra"],
-                "precio_actual": st["precio_actual"],
-                "trailing_sl": st["trailing_sl"],
-                "ultimo_flip_ts": ts_to_iso(st["ultimo_flip_ts"]) if st["ultimo_flip_ts"] else None,
-                "precio_flip": st["precio_flip"],
-            }
+                symbol_data[f"trend_{tf}"] = st["trend"]
+                symbol_data[f"señal_{tf}"] = st["señal_ultima_barra"]
+                symbol_data[f"trailing_sl_{tf}"] = st["trailing_sl"]
+                symbol_data[f"ultimo_flip_ts_{tf}"] = ts_to_iso(st["ultimo_flip_ts"]) if st["ultimo_flip_ts"] else None
+                symbol_data[f"precio_flip_{tf}"] = st["precio_flip"]
+                symbol_data[f"precio_actual_{tf}"] = st["precio_actual"]
 
-            flecha = "🟢" if st["trend"] == "buy" else "🔴"
-            flip_txt = f"  ⚡ FLIP {st['señal_ultima_barra']}" if st["señal_ultima_barra"] != "NONE" else ""
-            print(f"   {flecha} {symbol}: {st['trend'].upper()}{flip_txt}", flush=True)
+                # Precio de referencia (usar 15m como base)
+                if tf == "15m":
+                    symbol_data["precio_actual"] = st["precio_actual"]
 
-        except Exception as e:
-            print(f"   ❌ {symbol}: {str(e)[:80]}", flush=True)
-            estado["symbols"][symbol] = {"trend": "N/A", "error": str(e)[:120]}
-        time.sleep(0.3)
+            except Exception as e:
+                print(f"   ❌ {symbol} {tf}: {str(e)[:80]}", flush=True)
+                symbol_data[f"trend_{tf}"] = "N/A"
+                symbol_data[f"error_{tf}"] = str(e)[:120]
+
+            time.sleep(0.3)
+
+        # [COMPATIBILIDAD] `trend` = 15m (como antes)
+        symbol_data["trend"] = symbol_data.get("trend_15m", "N/A")
+        # [COMPATIBILIDAD] `señal_ultima_barra` = 15m
+        symbol_data["señal_ultima_barra"] = symbol_data.get("señal_15m", "NONE")
+        # [COMPATIBILIDAD] `trailing_sl` = 15m
+        symbol_data["trailing_sl"] = symbol_data.get("trailing_sl_15m")
+        # [COMPATIBILIDAD] `ultimo_flip_ts` = 15m
+        symbol_data["ultimo_flip_ts"] = symbol_data.get("ultimo_flip_ts_15m")
+        # [COMPATIBILIDAD] `precio_flip` = 15m
+        symbol_data["precio_flip"] = symbol_data.get("precio_flip_15m")
+
+        estado["symbols"][symbol] = symbol_data
+
+        # Log resumido
+        t5 = symbol_data.get("trend_5m", "?").upper()
+        t15 = symbol_data.get("trend_15m", "?").upper()
+        f5 = symbol_data.get("señal_5m", "")
+        f15 = symbol_data.get("señal_15m", "")
+        flip_txt = ""
+        if f5 and f5 != "NONE":
+            flip_txt += f" ⚡5m:{f5}"
+        if f15 and f15 != "NONE":
+            flip_txt += f" ⚡15m:{f15}"
+        print(f"   {symbol}: 5m={t5} 15m={t15}{flip_txt}", flush=True)
 
     with ST_STATE_FILE.open("w", encoding="utf-8") as f:
         json.dump(estado, f, indent=2)
 
     print("\n" + "=" * 70, flush=True)
-    print(f"✅ {len(estado['symbols'])} símbolos guardados en {ST_STATE_FILE}", flush=True)
+    print(f"✅ {len(estado['symbols'])} símbolos × {len(TIMEFRAMES)} TFs guardados en {ST_STATE_FILE}", flush=True)
     print("🏁 TERMINADO", flush=True)
 
 
