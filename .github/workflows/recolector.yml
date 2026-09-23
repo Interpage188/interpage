@@ -84,6 +84,6 @@ jobs:
             echo "📭 Sin cambios."
           else
             git commit -m "Recolector + Watcher [skip ci] $(date -u +'%Y-%m-%d %H:%M UTC')"
-            git push
-            echo "✅ Commit OK."
+            git pull --rebase origin main || true
+            git push || echo "⚠️ Push falló (race condition), se reintentará en el próximo ciclo"
           fi
