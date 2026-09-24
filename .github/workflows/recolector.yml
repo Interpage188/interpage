@@ -1,11 +1,11 @@
-name: Structure Bot — BOS CHoCH
+name: RECOLECTOR
 
 permissions:
   contents: write
 
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '2,7,12,17,22,27,32,37,42,47,52,57 * * * *'
   workflow_dispatch:
 
 concurrency:
@@ -13,10 +13,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  run:
+  monitor:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -24,48 +24,74 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
-      - name: Verify script
+      - name: Check Python syntax (recolector)
         run: |
-          if [ ! -f structure_bot.py ]; then
-            echo "❌ structure_bot.py no encontrado"
-            exit 1
-          fi
-          echo "✅ structure_bot.py encontrado"
+          python -m py_compile recolector.py
+          echo "✅ Sintaxis recolector OK"
 
-      - name: Syntax check
+      - name: Check Python syntax (watcher)
         run: |
-          python -m py_compile structure_bot.py
-          echo "✅ Sintaxis OK"
+          python -m py_compile watcher.py
+          echo "✅ Sintaxis watcher OK"
 
-      - name: Run Structure Bot
+      - name: Run RECOLECTOR
+        run: python recolector.py
+
+      - name: Run WATCHER
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python structure_bot.py
+        run: python watcher.py
 
-      - name: Commit state
+      - name: Show cache status
+        if: always()
+        run: |
+          echo "📁 Archivos en data/cache/:"
+          ls -la data/cache/ 2>/dev/null | head -20 || echo "(vacío)"
+
+          echo ""
+          echo "📊 Resumen:"
+          if [ -d data/cache ]; then
+            total=$(ls data/cache/*.json 2>/dev/null | wc -l)
+            echo "   Archivos cache: $total"
+            du -sh data/cache/ 2>/dev/null
+          fi
+
+          echo ""
+          if [ -f data/pending_levels.json ]; then
+            python -c "import json;d=json.load(open('data/pending_levels.json'));print(f'   Niveles pendientes: {len(d)}')"
+          else
+            echo "   Sin pending_levels.json aún"
+          fi
+
+      - name: Commit cache + pending levels
         if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          if [ -f data/structure_state.json ]; then
-            git add data/structure_state.json
+          if [ -d data/cache ]; then
+            git add data/cache/
+          fi
+          if [ -f data/pending_levels.json ]; then
+            git add data/pending_levels.json
           fi
 
           if git diff --staged --quiet; then
-            echo "📭 Sin cambios"
+            echo "📭 Sin cambios."
           else
-            git commit -m "Structure Bot: update [skip ci]"
+            git commit -m "Recolector + Watcher [skip ci] $(date -u +'%Y-%m-%d %H:%M UTC')"
 
+            # Pull con reintentos
             for i in 1 2 3; do
               git pull --rebase origin main && break
               echo "⚠️ Pull intento $i falló, reintentando en 5s..."
               sleep 5
             done
 
+            # Push con reintentos
             for i in 1 2 3; do
               git push && echo "✅ Push OK" && break
               echo "⚠️ Push intento $i falló, reintentando en 10s..."
