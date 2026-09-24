@@ -2,8 +2,12 @@ name: SUPERTREND
 
 on:
   schedule:
-    - cron: "3,18,33,48 * * * *"     # cada 15 min, desfasado del recolector (:2/:7/:12/...)
+    - cron: "3,18,33,48 * * * *"
   workflow_dispatch:
+
+concurrency:
+  group: repo-main-push
+  cancel-in-progress: false
 
 jobs:
   supertrend:
@@ -12,6 +16,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -24,7 +30,24 @@ jobs:
         run: |
           git config user.name "supertrend-bot"
           git config user.email "bot@users.noreply.github.com"
-          git pull --rebase origin main || true
+
           git add data/supertrend_state.json
-          git diff --staged --quiet || git commit -m "supertrend: update state [skip ci]"
-          git push
+
+          if git diff --staged --quiet; then
+            echo "📭 Sin cambios"
+          else
+            git commit -m "supertrend: update state [skip ci]"
+
+            for i in 1 2 3; do
+              git pull --rebase origin main && break
+              echo "⚠️ Pull intento $i falló, reintentando en 5s..."
+              sleep 5
+            done
+
+            for i in 1 2 3; do
+              git push && echo "✅ Push OK" && break
+              echo "⚠️ Push intento $i falló, reintentando en 10s..."
+              git pull --rebase origin main || true
+              sleep 10
+            done
+          fi
