@@ -691,54 +691,14 @@
     "high_5": 7.889,
     "low_5": 7.791,
     "actualizado": "2026-09-26T16:55:37.841747+00:00",
-    "pending": {
-      "version": "V2.1",
-      "tipo": "BOS BAJISTA",
-      "direccion": "down",
-      "creado_ts": 1790441100000,
-      "expira_ts": 1790455500000,
-      "idx_evento": 99,
-      "idx_swing": 20,
-      "nivel_roto": 7.811,
-      "fibo_zones": [
-        {
-          "mult": 3,
-          "distancia_velas": 237,
-          "idx": 336
-        },
-        {
-          "mult": 5,
-          "distancia_velas": 395,
-          "idx": 494
-        },
-        {
-          "mult": 8,
-          "distancia_velas": 632,
-          "idx": 731
-        },
-        {
-          "mult": 13,
-          "distancia_velas": 1027,
-          "idx": 1126
-        },
-        {
-          "mult": 21,
-          "distancia_velas": 1659,
-          "idx": 1758
-        },
-        {
-          "mult": 34,
-          "distancia_velas": 2686,
-          "idx": 2785
-        }
-      ],
-      "poc_precio": 7.833104166666667,
-      "poc_btm": 7.82125,
-      "poc_top": 7.8449583333333335,
-      "rango_top": 8.248,
-      "rango_btm": 7.679,
-      "poc_volumen": 47937.74262083333
-    }
+    "pending": null,
+    "entradas": [
+      {
+        "ts": 1790441100000,
+        "señal": "ENTRY SHORT",
+        "poc": 7.833104166666667
+      }
+    ]
   },
   "INJ_1h": {
     "version": "V2.1",
