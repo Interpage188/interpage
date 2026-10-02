@@ -47,8 +47,7 @@ jobs:
 
       - name: Run MULTI TF COINBEACON B
         env:
-          COINBEACON_TOKEN: ${{ secrets.COINBEACON_TOKEN2 }}
-          COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
+          COINBEACON_TOKEN: ${{ secrets.COINBEACON_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python multi_tf_coinbeaconB.py
