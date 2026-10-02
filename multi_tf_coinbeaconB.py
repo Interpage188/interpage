@@ -1196,13 +1196,8 @@ def main():
     print(f"   Detalle: {patron_btc['detalle']}", flush=True)
 
     if COMP_MODO_FILTRO == "hard" and not patron_btc["pasa"]:
-        send_telegram_message(
-            f"🎯 FILTRO 1: COMPRESIÓN→EXPANSIÓN BTC\n"
-            f"⚪ {patron_btc['estado'].upper()}\n"
-            f"   {patron_btc['detalle']}\n"
-            f"⏸️ Análisis omitido"
-        )
-        print("\n⏸️ Filtro no pasó — abortando", flush=True)
+        # Silencio total cuando no hay patrón
+        print(f"\n⏸️ Filtro no pasó ({patron_btc['estado'].upper()}) — abortando en silencio", flush=True)
         return
 
     print("✅ Filtro pasó\n", flush=True)
