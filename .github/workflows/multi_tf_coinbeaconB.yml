@@ -62,6 +62,7 @@ jobs:
           if [ -f data/multi_tf_coinbeaconB_state.json ]; then git add data/multi_tf_coinbeaconB_state.json; fi
           if [ -f data/historial_lineas_B.csv ]; then git add data/historial_lineas_B.csv; fi
           if [ -f data/correlacion_btc_alt_B.csv ]; then git add data/correlacion_btc_alt_B.csv; fi
+          if [ -f data/patron_btc_ultimo_estado.json ]; then git add data/patron_btc_ultimo_estado.json; fi
 
           if git diff --staged --quiet; then
             echo "📭 No hay cambios."
