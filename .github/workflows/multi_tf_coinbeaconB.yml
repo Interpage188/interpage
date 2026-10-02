@@ -1,0 +1,73 @@
+name: MULTI TF COINBEACON B
+
+permissions:
+  contents: write
+
+on:
+  schedule:
+    # Cada 30 min: :20 y :50
+    - cron: '20,50 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: multi-tf-coinbeaconB
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install requests
+
+      - name: Verify multi_tf_coinbeaconB.py exists
+        run: |
+          if [ ! -f multi_tf_coinbeaconB.py ]; then
+            echo "❌ multi_tf_coinbeaconB.py no encontrado"
+            exit 1
+          fi
+          echo "✅ multi_tf_coinbeaconB.py encontrado"
+
+      - name: Check Python syntax
+        run: |
+          python -m py_compile multi_tf_coinbeaconB.py
+          echo "✅ Python syntax OK"
+
+      - name: Run MULTI TF COINBEACON B
+        env:
+          COINBEACON_TOKEN: ${{ secrets.COINBEACON_TOKEN2 }}
+          COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python multi_tf_coinbeaconB.py
+
+      - name: Commit historical data
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if [ -f data/multi_tf_coinbeaconB.csv ]; then git add data/multi_tf_coinbeaconB.csv; fi
+          if [ -f data/multi_tf_coinbeaconB_state.json ]; then git add data/multi_tf_coinbeaconB_state.json; fi
+          if [ -f data/historial_lineas_B.csv ]; then git add data/historial_lineas_B.csv; fi
+          if [ -f data/correlacion_btc_alt_B.csv ]; then git add data/correlacion_btc_alt_B.csv; fi
+
+          if git diff --staged --quiet; then
+            echo "📭 No hay cambios."
+          else
+            git commit -m "Actualizar Multi-TF CoinBeaconB [skip ci]"
+            git pull --rebase origin main || true
+            git push || echo "⚠️ Push falló"
+          fi
