@@ -1149,13 +1149,14 @@ def main():
     guardar_ultimo_patron(estado_actual)
 
     if cambio_estado:
+        ahora_lima_str = (datetime.now(timezone.utc) + LIMA_OFFSET).strftime("%Y-%m-%d %H:%M")
         if estado_actual == "comprimiendo":
             send_telegram_message(
                 f"🌀 COMPRESIÓN BTC DETECTADA\n"
                 f"━━━━━━━━━━━━━━━━━━━\n"
                 f"   {patron_btc['detalle']}\n"
                 f"⏳ Esperando ruptura (UP o DOWN)\n"
-                f"🕐 {datetime.now(timezone.utc).strftime('%H:%M')} UTC"
+                f"🕐 {ahora_lima_str} (Lima)"
             )
         elif estado_actual == "expandiendo":
             send_telegram_message(
@@ -1163,7 +1164,7 @@ def main():
                 f"━━━━━━━━━━━━━━━━━━━\n"
                 f"   {patron_btc['detalle']}\n"
                 f"✅ Filtro pasa → analizando monedas...\n"
-                f"🕐 {datetime.now(timezone.utc).strftime('%H:%M')} UTC"
+                f"🕐 {ahora_lima_str} (Lima)"
             )
 
     if COMP_MODO_FILTRO == "hard" and not patron_btc["pasa"]:
