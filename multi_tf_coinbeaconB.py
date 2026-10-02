@@ -62,6 +62,9 @@ COMP_FACTOR_EXPANSION = 3.0
 COMP_HORAS_RECIENTE   = 6
 COMP_MODO_FILTRO      = "hard"
 
+# Throttle: no repetir el mismo aviso antes de N minutos
+COMP_THROTTLE_MIN     = 30
+
 
 def hora_permite_envio():
     now_lima = datetime.now(timezone.utc) + LIMA_OFFSET
@@ -220,7 +223,6 @@ def analizar_patron_btc(btc_cache):
 
     # ============================================================
     # 1) EXPANSIÓN: vela grande vs promedio de las PREVIAS
-    #    (fix: no se incluye a sí misma en el promedio)
     # ============================================================
     for k in range(max(0, n - 4), n):
         vela_actual = velas[k]["rango"]
@@ -255,20 +257,28 @@ def analizar_patron_btc(btc_cache):
 
 
 def cargar_ultimo_patron():
+    """Devuelve dict con estado y ts del último aviso."""
     if not PATRON_STATE_FILE.exists():
-        return None
+        return {"estado": None, "ts": 0}
     try:
         with PATRON_STATE_FILE.open("r", encoding="utf-8") as f:
-            return json.load(f).get("estado")
+            data = json.load(f)
+        return {
+            "estado": data.get("estado"),
+            "ts": data.get("ts", 0),
+        }
     except Exception:
-        return None
+        return {"estado": None, "ts": 0}
 
 
 def guardar_ultimo_patron(estado):
     try:
         with PATRON_STATE_FILE.open("w", encoding="utf-8") as f:
-            json.dump({"estado": estado,
-                       "updated_at": datetime.now(timezone.utc).isoformat()}, f)
+            json.dump({
+                "estado": estado,
+                "ts": datetime.now(timezone.utc).timestamp(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }, f)
     except Exception as e:
         print(f"⚠️ No se pudo guardar estado patrón: {e}", flush=True)
 
@@ -1159,14 +1169,20 @@ def main():
     print(f"   Detalle: {patron_btc['detalle']}", flush=True)
 
     # ============================================================
-    # AVISO INTELIGENTE: solo cuando CAMBIA el estado
+    # AVISO INTELIGENTE con throttle
     # ============================================================
-    estado_actual = patron_btc["estado"]
-    estado_anterior = cargar_ultimo_patron()
-    cambio_estado = (estado_actual != estado_anterior)
-    guardar_ultimo_patron(estado_actual)
+    ahora_ts = datetime.now(timezone.utc).timestamp()
+    ultimo = cargar_ultimo_patron()
+    estado_anterior = ultimo["estado"]
+    ts_anterior = ultimo["ts"]
 
-    if cambio_estado:
+    estado_actual = patron_btc["estado"]
+    cambio_estado = (estado_actual != estado_anterior)
+    reintentar = (ahora_ts - ts_anterior) > (COMP_THROTTLE_MIN * 60)
+    debe_avisar = cambio_estado or reintentar
+
+    if debe_avisar:
+        guardar_ultimo_patron(estado_actual)
         ahora_lima_str = (datetime.now(timezone.utc) + LIMA_OFFSET).strftime("%Y-%m-%d %H:%M")
 
         if estado_actual == "comprimiendo":
@@ -1177,7 +1193,6 @@ def main():
                 f"⏳ Esperando ruptura (UP o DOWN)\n"
                 f"🕐 {ahora_lima_str} (Lima)"
             )
-
         elif estado_actual == "expandiendo":
             direccion = patron_btc.get("direccion", "?")
             operacion = "LONG" if direccion == "up" else "SHORT"
