@@ -87,7 +87,7 @@ COINGECKO_IDS = {
 # CACHE REMOTO — TU repo interpage
 # ============================================================
 CACHE_REMOTE_BASE = (
-    "https://raw.githubusercontent.com/mattluna3/"
+    "https://raw.githubusercontent.com/Interpage188/"
     "interpage/main/data/cache"
 )
 CACHE_MAX_EDAD_MIN = 40
