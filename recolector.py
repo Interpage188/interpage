@@ -12,7 +12,7 @@ from pathlib import Path
 #   17 monedas
 #   Frecuencia: cada 5 min
 #   Fuente: OKX (velas OHLC reales)
-#   Retención: 168h (7 días) pulso + velas_5m acumuladas
+#   Retención: 168h (7 días) pulso + velas_5m acumuladas (solo BTC)
 # ============================================================
 
 SYMBOLS = [
@@ -40,7 +40,7 @@ RSI_EXTREMO_ALTO = 70
 RSI_RECUP_BAJO   = 40
 RSI_RECUP_ALTO   = 60
 
-RETENCION_PULSO_H = 168        # ← 7 días (antes 12)
+RETENCION_PULSO_H = 168
 OKX_LIMIT_VELAS = 100
 
 DATA_DIR = Path("data")
@@ -221,21 +221,32 @@ def actualizar_pulso(symbol, ahora):
     cache["pulso"] = pulso
 
     # ═══════════════════════════════════════════════════════════
-    # ACUMULAR velas_5m (con dedup por ts) — para el filtro
-    # compresión→expansión del multi_tf_coinbeacon
+    # ACUMULAR VELAS — SOLO BTC acumula históricamente.
+    # El resto solo guarda las últimas 100 de cada TF (sobreescribe).
+    # Razón: el filtro compresión→expansión del multi_tf_coinbeacon
+    # solo analiza BTC. Las velas de las otras monedas no se usan.
     # ═══════════════════════════════════════════════════════════
-    velas_previas = cache.get("velas_5m", [])
-    ts_vistos = {v["ts"] for v in velas_previas}
-    for v in velas_5m:
-        if v["ts"] not in ts_vistos:
-            velas_previas.append(v)
-    velas_previas.sort(key=lambda x: x["ts"])
-    limite_velas = int((ahora.timestamp() - RETENCION_PULSO_H * 3600) * 1000)
-    cache["velas_5m"] = [v for v in velas_previas if v["ts"] >= limite_velas]
+    if symbol == "BTC":
+        # Acumular velas_5m con dedup por ts
+        velas_previas = cache.get("velas_5m", [])
+        ts_vistos = {v["ts"] for v in velas_previas}
+        for v in velas_5m:
+            if v["ts"] not in ts_vistos:
+                velas_previas.append(v)
+        velas_previas.sort(key=lambda x: x["ts"])
+        limite_velas = int((ahora.timestamp() - RETENCION_PULSO_H * 3600) * 1000)
+        cache["velas_5m"] = [v for v in velas_previas if v["ts"] >= limite_velas]
 
-    # Estas siguen sobreescribiéndose (OKX da 100 velas de sobra)
-    cache["velas_15m"] = velas_15m
-    cache["velas_1h"]  = velas_1h
+        # Las siguientes se acumulan también (para multi-timeframe futuro)
+        cache["velas_15m"] = velas_15m
+        cache["velas_1h"]  = velas_1h
+        cache["velas_4h"]  = velas_4h
+    else:
+        # Otras monedas: solo las últimas 100 (no acumula)
+        cache["velas_5m"]  = velas_5m
+        cache["velas_15m"] = velas_15m
+        cache["velas_1h"]  = velas_1h
+        cache["velas_4h"]  = velas_4h
 
     guardar_cache(symbol, cache)
 
@@ -251,12 +262,17 @@ def actualizar_pulso(symbol, ahora):
         "desconocida": "⚪",
     }.get(zona, "⚪")
 
+    if symbol == "BTC":
+        velas_info = f"velas5m={len(cache['velas_5m'])}"
+    else:
+        velas_info = f"velas5m={len(cache['velas_5m'])}"
+
     print(
         f"   {icono_zona} {symbol} [{zona}]: ${price:.6f} | "
         f"RSI15={rsi15_str} {sample['dir15']} | "
         f"RSI1h={rsi1h_str} | RSI4h={rsi4h_str} | "
         f"RVOL={sample['rvol15']:.2f} | "
-        f"pulso={len(pulso)} | velas5m={len(cache['velas_5m'])}",
+        f"pulso={len(pulso)} | {velas_info}",
         flush=True
     )
     return True
@@ -266,7 +282,7 @@ def main():
     ahora = datetime.now(timezone.utc)
 
     print("\n" + "=" * 70, flush=True)
-    print("📦 RECOLECTOR — Fase 1.8 (acumula velas_5m 7 días)", flush=True)
+    print("📦 RECOLECTOR — Fase 1.8 (acumula velas_5m solo para BTC)", flush=True)
     print(f"   {len(SYMBOLS)} monedas | cada 5 min", flush=True)
     print(f"   Retención: {RETENCION_PULSO_H}h", flush=True)
     print("=" * 70, flush=True)
