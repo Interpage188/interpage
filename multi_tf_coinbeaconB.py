@@ -7,6 +7,7 @@ import os
 import sys
 import urllib.parse
 import urllib.request
+import urllib.error
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import requests
@@ -42,14 +43,17 @@ PD_MIN_PCT = 2.0
 DATA_DIR = Path("data")
 DATA_DIR.mkdir(exist_ok=True)
 
+# Archivos para el flujo principal (alertas, RSI)
 STATE_FILE = DATA_DIR / "multi_tf_coinbeaconB_state.json"
 CSV_FILE = DATA_DIR / "multi_tf_coinbeaconB.csv"
 HISTORICO_CSV_FILE = DATA_DIR / "historial_lineas_B.csv"
 CORRELACION_CSV_FILE = DATA_DIR / "correlacion_btc_alt_B.csv"
 
-STATE_FILE_REMOTE = (
+# Archivo DEDICADO para el throttle (evita conflictos con el state principal)
+THROTTLE_FILE = DATA_DIR / "multi_tf_coinbeaconB_throttle.json"
+THROTTLE_REMOTE = (
     "https://raw.githubusercontent.com/Interpage188/"
-    "interpage/main/data/multi_tf_coinbeaconB_state.json"
+    "interpage/main/data/multi_tf_coinbeaconB_throttle.json"
 )
 
 LIMA_OFFSET = timedelta(hours=-5)
@@ -225,9 +229,6 @@ def analizar_patron_btc(btc_cache):
     ratio = r_ult / r_pre
     ahora = datetime.now(timezone.utc).timestamp()
 
-    # ============================================================
-    # 1) EXPANSIÓN: vela grande vs promedio de las PREVIAS
-    # ============================================================
     for k in range(max(0, n - 4), n):
         vela_actual = velas[k]["rango"]
         anteriores = [velas[i]["rango"] for i in range(max(0, k - 6), k)]
@@ -249,9 +250,6 @@ def analizar_patron_btc(btc_cache):
                                f"({vela_actual / prom_previo:.1f}x)"
                 }
 
-    # ============================================================
-    # 2) COMPRESIÓN
-    # ============================================================
     if ratio < COMP_RATIO_COMPRESION:
         return {"pasa": True, "estado": "comprimiendo",
                 "detalle": f"comprimiendo {ratio:.2f}x"}
@@ -260,42 +258,49 @@ def analizar_patron_btc(btc_cache):
             "detalle": f"rango normal ({ratio:.2f}x)"}
 
 
-def cargar_ultimo_patron():
-    """Lee el estado del patrón desde GitHub raw (evita race conditions)."""
+# ============================================================
+# THROTTLE (archivo dedicado, no mezclado con el state principal)
+# ============================================================
+# Devuelve:
+#   {"ok": True,  "estado": "...", "ts": ...}  → lectura OK
+#   {"ok": True,  "estado": None, "ts": 0}     → archivo no existe (primera vez)
+#   {"ok": False, "estado": None, "ts": 0}     → error de lectura
+# ============================================================
+
+def cargar_throttle():
     try:
         req = urllib.request.Request(
-            STATE_FILE_REMOTE, headers={"User-Agent": "Mozilla/5.0"}
+            THROTTLE_REMOTE, headers={"User-Agent": "Mozilla/5.0"}
         )
         with urllib.request.urlopen(req, timeout=10) as r:
             data = json.loads(r.read().decode("utf-8"))
-        if isinstance(data, dict):
-            return {
-                "estado": data.get("patron_btc_estado"),
-                "ts": data.get("patron_btc_ts", 0),
-            }
+        return {
+            "ok": True,
+            "estado": data.get("estado"),
+            "ts": data.get("ts", 0),
+        }
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            # Archivo no existe → primera vez, es válido
+            return {"ok": True, "estado": None, "ts": 0}
+        print(f"   ⚠️ throttle HTTP error {e.code}", flush=True)
+        return {"ok": False, "estado": None, "ts": 0}
     except Exception as e:
-        print(f"   ⚠️ No se pudo leer state remoto: {str(e)[:60]}", flush=True)
-    return {"estado": None, "ts": 0}
+        print(f"   ⚠️ throttle remoto: {str(e)[:60]}", flush=True)
+        return {"ok": False, "estado": None, "ts": 0}
 
 
-def guardar_ultimo_patron(estado):
-    """Guarda el estado del patrón dentro de STATE_FILE (local)."""
-    data = {}
-    if STATE_FILE.exists():
-        try:
-            with STATE_FILE.open("r", encoding="utf-8") as f:
-                prev = json.load(f)
-            if isinstance(prev, dict):
-                data = prev
-        except Exception:
-            data = {}
-    data["patron_btc_estado"] = estado
-    data["patron_btc_ts"] = datetime.now(timezone.utc).timestamp()
+def guardar_throttle(estado):
+    """Escribe el throttle en su archivo dedicado. El workflow lo commitea."""
     try:
-        with STATE_FILE.open("w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
+        with THROTTLE_FILE.open("w", encoding="utf-8") as f:
+            json.dump({
+                "estado": estado,
+                "ts": datetime.now(timezone.utc).timestamp(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }, f, indent=2)
     except Exception as e:
-        print(f"⚠️ No se pudo guardar estado patrón: {e}", flush=True)
+        print(f"⚠️ No se pudo guardar throttle: {e}", flush=True)
 
 
 # ============================================================
@@ -831,7 +836,7 @@ def send_telegram_message(message):
 
 
 # ============================================================
-# CSV, ESTADO
+# CSV, ESTADO (alertas + RSI solamente)
 # ============================================================
 
 def guardar_en_csv(alert_data):
@@ -853,16 +858,13 @@ def guardar_en_csv(alert_data):
 
 
 def cargar_estado():
-    """Lee la lista de alertas (soporta formato list antiguo y dict nuevo)."""
     if not STATE_FILE.exists():
         return []
     try:
         with STATE_FILE.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, list):
-            return data
-        if isinstance(data, dict):
-            return data.get("alertas", [])
+            estado = json.load(f)
+        if isinstance(estado, list):
+            return estado
     except Exception:
         pass
     return []
@@ -884,19 +886,8 @@ def limpiar_estado(previous_state, now_ts):
 
 
 def guardar_estado(estado):
-    """Guarda alertas + preserva el estado del patrón en el mismo archivo."""
-    data = {}
-    if STATE_FILE.exists():
-        try:
-            with STATE_FILE.open("r", encoding="utf-8") as f:
-                prev = json.load(f)
-            if isinstance(prev, dict):
-                data = prev
-        except Exception:
-            pass
-    data["alertas"] = estado
     with STATE_FILE.open("w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+        json.dump(estado, f, indent=2)
 
 
 # ============================================================
@@ -1198,20 +1189,35 @@ def main():
     print(f"   Detalle: {patron_btc['detalle']}", flush=True)
 
     # ============================================================
-    # AVISO INTELIGENTE con throttle (lee de GitHub raw)
+    # AVISO INTELIGENTE — con manejo robusto de errores
     # ============================================================
-    ahora_ts = datetime.now(timezone.utc).timestamp()
-    ultimo = cargar_ultimo_patron()
-    estado_anterior = ultimo["estado"]
-    ts_anterior = ultimo["ts"]
-
     estado_actual = patron_btc["estado"]
-    cambio_estado = (estado_actual != estado_anterior)
-    reintentar = (ahora_ts - ts_anterior) > (COMP_THROTTLE_MIN * 60)
-    debe_avisar = cambio_estado or reintentar
+    ahora_ts = datetime.now(timezone.utc).timestamp()
+
+    lectura = cargar_throttle()
+
+    if not lectura["ok"]:
+        # NO pudimos leer el estado remoto. NO enviamos para no duplicar.
+        print("   ⚠️ No se pudo leer el throttle remoto → NO se enviará aviso", flush=True)
+        debe_avisar = False
+    else:
+        estado_anterior = lectura["estado"]
+        ts_anterior = lectura["ts"]
+
+        if estado_anterior is None:
+            # Primera vez que corre. Enviar y guardar.
+            print("   📭 Throttle no existe → primera vez, se enviará", flush=True)
+            debe_avisar = True
+        else:
+            cambio_estado = (estado_actual != estado_anterior)
+            reintentar = (ahora_ts - ts_anterior) > (COMP_THROTTLE_MIN * 60)
+            debe_avisar = cambio_estado or reintentar
+            print(f"   📖 Anterior: {estado_anterior} | Actual: {estado_actual} | "
+                  f"Δts: {(ahora_ts - ts_anterior)/60:.1f} min | "
+                  f"avisar: {debe_avisar}", flush=True)
 
     if debe_avisar:
-        guardar_ultimo_patron(estado_actual)
+        guardar_throttle(estado_actual)
         ahora_lima_str = (datetime.now(timezone.utc) + LIMA_OFFSET).strftime("%Y-%m-%d %H:%M")
 
         if estado_actual == "comprimiendo":
@@ -1239,6 +1245,12 @@ def main():
                 f"✅ Filtro pasa → analizando monedas...\n"
                 f"🕐 {ahora_lima_str} (Lima)"
             )
+        else:
+            # NEUTRAL o SIN_DATOS — no enviamos, pero guardamos el estado
+            # para que no se repita en la próxima corrida.
+            print(f"   ⏸️ Estado {estado_actual} — throttle guardado, sin envío", flush=True)
+    else:
+        print("   🔇 Throttle activo — sin envío", flush=True)
 
     if COMP_MODO_FILTRO == "hard" and not patron_btc["pasa"]:
         print(f"\n⏸️ Filtro no pasó ({estado_actual.upper()}) — abortando en silencio", flush=True)
