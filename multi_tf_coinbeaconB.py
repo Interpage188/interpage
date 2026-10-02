@@ -46,7 +46,6 @@ STATE_FILE = DATA_DIR / "multi_tf_coinbeaconB_state.json"
 CSV_FILE = DATA_DIR / "multi_tf_coinbeaconB.csv"
 HISTORICO_CSV_FILE = DATA_DIR / "historial_lineas_B.csv"
 CORRELACION_CSV_FILE = DATA_DIR / "correlacion_btc_alt_B.csv"
-PATRON_STATE_FILE = DATA_DIR / "patron_btc_ultimo_estado.json"
 
 LIMA_OFFSET = timedelta(hours=-5)
 HORA_INICIO = 0
@@ -221,9 +220,6 @@ def analizar_patron_btc(btc_cache):
     ratio = r_ult / r_pre
     ahora = datetime.now(timezone.utc).timestamp()
 
-    # ============================================================
-    # 1) EXPANSIÓN: vela grande vs promedio de las PREVIAS
-    # ============================================================
     for k in range(max(0, n - 4), n):
         vela_actual = velas[k]["rango"]
         anteriores = [velas[i]["rango"] for i in range(max(0, k - 6), k)]
@@ -245,9 +241,6 @@ def analizar_patron_btc(btc_cache):
                                f"({vela_actual / prom_previo:.1f}x)"
                 }
 
-    # ============================================================
-    # 2) COMPRESIÓN
-    # ============================================================
     if ratio < COMP_RATIO_COMPRESION:
         return {"pasa": True, "estado": "comprimiendo",
                 "detalle": f"comprimiendo {ratio:.2f}x"}
@@ -256,29 +249,45 @@ def analizar_patron_btc(btc_cache):
             "detalle": f"rango normal ({ratio:.2f}x)"}
 
 
+# ============================================================
+# CAMBIO 1: lee de STATE_FILE en vez de PATRON_STATE_FILE
+# ============================================================
 def cargar_ultimo_patron():
-    """Devuelve dict con estado y ts del último aviso."""
-    if not PATRON_STATE_FILE.exists():
+    """Lee el estado del patrón desde STATE_FILE (que SÍ se commitea)."""
+    if not STATE_FILE.exists():
         return {"estado": None, "ts": 0}
     try:
-        with PATRON_STATE_FILE.open("r", encoding="utf-8") as f:
+        with STATE_FILE.open("r", encoding="utf-8") as f:
             data = json.load(f)
-        return {
-            "estado": data.get("estado"),
-            "ts": data.get("ts", 0),
-        }
+        if isinstance(data, dict):
+            return {
+                "estado": data.get("patron_btc_estado"),
+                "ts": data.get("patron_btc_ts", 0),
+            }
+        return {"estado": None, "ts": 0}
     except Exception:
         return {"estado": None, "ts": 0}
 
 
+# ============================================================
+# CAMBIO 2: escribe en STATE_FILE en vez de PATRON_STATE_FILE
+# ============================================================
 def guardar_ultimo_patron(estado):
+    """Guarda el estado del patrón dentro de STATE_FILE."""
+    data = {}
+    if STATE_FILE.exists():
+        try:
+            with STATE_FILE.open("r", encoding="utf-8") as f:
+                prev = json.load(f)
+            if isinstance(prev, dict):
+                data = prev
+        except Exception:
+            data = {}
+    data["patron_btc_estado"] = estado
+    data["patron_btc_ts"] = datetime.now(timezone.utc).timestamp()
     try:
-        with PATRON_STATE_FILE.open("w", encoding="utf-8") as f:
-            json.dump({
-                "estado": estado,
-                "ts": datetime.now(timezone.utc).timestamp(),
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            }, f)
+        with STATE_FILE.open("w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
     except Exception as e:
         print(f"⚠️ No se pudo guardar estado patrón: {e}", flush=True)
 
@@ -837,14 +846,20 @@ def guardar_en_csv(alert_data):
         csv.DictWriter(f, fieldnames=fieldnames).writerow(alert_data)
 
 
+# ============================================================
+# CAMBIO 3: acepta formato dict (nuevo) o list (viejo)
+# ============================================================
 def cargar_estado():
+    """Lee la lista de alertas (soporta formato list antiguo y dict nuevo)."""
     if not STATE_FILE.exists():
         return []
     try:
         with STATE_FILE.open("r", encoding="utf-8") as f:
-            estado = json.load(f)
-        if isinstance(estado, list):
-            return estado
+            data = json.load(f)
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            return data.get("alertas", [])
     except Exception:
         pass
     return []
@@ -865,9 +880,23 @@ def limpiar_estado(previous_state, now_ts):
     return resultado
 
 
+# ============================================================
+# CAMBIO 4: guarda alertas + preserva estado del patrón
+# ============================================================
 def guardar_estado(estado):
+    """Guarda alertas + preserva el estado del patrón en el mismo archivo."""
+    data = {}
+    if STATE_FILE.exists():
+        try:
+            with STATE_FILE.open("r", encoding="utf-8") as f:
+                prev = json.load(f)
+            if isinstance(prev, dict):
+                data = prev
+        except Exception:
+            pass
+    data["alertas"] = estado
     with STATE_FILE.open("w", encoding="utf-8") as f:
-        json.dump(estado, f, indent=2)
+        json.dump(data, f, indent=2)
 
 
 # ============================================================
@@ -1159,18 +1188,12 @@ def main():
     print("=" * 70, flush=True)
     print(f"\nHora UTC: {datetime.now(timezone.utc).isoformat()}", flush=True)
 
-    # ============================================================
-    # FILTRO 1
-    # ============================================================
     print("\n🔍 FILTRO 1: compresión→expansión BTC...", flush=True)
     btc_cache_full = leer_cache_remoto(BTC_SYMBOL)
     patron_btc = analizar_patron_btc(btc_cache_full)
     print(f"   Estado:  {patron_btc['estado'].upper()}", flush=True)
     print(f"   Detalle: {patron_btc['detalle']}", flush=True)
 
-    # ============================================================
-    # AVISO INTELIGENTE con throttle
-    # ============================================================
     ahora_ts = datetime.now(timezone.utc).timestamp()
     ultimo = cargar_ultimo_patron()
     estado_anterior = ultimo["estado"]
@@ -1217,9 +1240,6 @@ def main():
 
     print("✅ Filtro pasó\n", flush=True)
 
-    # ============================================================
-    # FLUJO NORMAL
-    # ============================================================
     previous_state = cargar_estado()
     rsi4_anterior = None
     prev_btc = {}
