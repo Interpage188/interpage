@@ -218,16 +218,34 @@ def analizar_patron_btc(btc_cache):
     ratio = r_ult / r_pre
     ahora = datetime.now(timezone.utc).timestamp()
 
-    for k in range(max(0, n - 3), n):
-        rango_v = velas[k]["rango"]
-        if r_ult > 0 and rango_v > r_ult * COMP_FACTOR_EXPANSION:
+    # ============================================================
+    # 1) EXPANSIÓN: vela grande vs promedio de las PREVIAS
+    #    (fix: no se incluye a sí misma en el promedio)
+    # ============================================================
+    for k in range(max(0, n - 4), n):
+        vela_actual = velas[k]["rango"]
+        anteriores = [velas[i]["rango"] for i in range(max(0, k - 6), k)]
+        if not anteriores:
+            continue
+        prom_previo = _media(anteriores)
+        if prom_previo > 0 and vela_actual > prom_previo * COMP_FACTOR_EXPANSION:
             edad_h = (ahora - velas[k]["timestamp"]) / 3600
             if edad_h <= COMP_HORAS_RECIENTE:
                 d = "up" if velas[k]["close"] > velas[k]["open"] else "down"
-                return {"pasa": True, "estado": "expandiendo",
-                        "detalle": f"expansión {d.upper()} hace {edad_h:.1f}h "
-                                   f"({rango_v / r_ult:.1f}x)"}
+                return {
+                    "pasa": True,
+                    "estado": "expandiendo",
+                    "direccion": d,
+                    "precio": velas[k]["close"],
+                    "fuerza": vela_actual / prom_previo,
+                    "edad_h": edad_h,
+                    "detalle": f"expansión {d.upper()} hace {edad_h:.1f}h "
+                               f"({vela_actual / prom_previo:.1f}x)"
+                }
 
+    # ============================================================
+    # 2) COMPRESIÓN
+    # ============================================================
     if ratio < COMP_RATIO_COMPRESION:
         return {"pasa": True, "estado": "comprimiendo",
                 "detalle": f"comprimiendo {ratio:.2f}x"}
@@ -1150,6 +1168,7 @@ def main():
 
     if cambio_estado:
         ahora_lima_str = (datetime.now(timezone.utc) + LIMA_OFFSET).strftime("%Y-%m-%d %H:%M")
+
         if estado_actual == "comprimiendo":
             send_telegram_message(
                 f"🌀 COMPRESIÓN BTC DETECTADA\n"
@@ -1158,11 +1177,21 @@ def main():
                 f"⏳ Esperando ruptura (UP o DOWN)\n"
                 f"🕐 {ahora_lima_str} (Lima)"
             )
+
         elif estado_actual == "expandiendo":
+            direccion = patron_btc.get("direccion", "?")
+            operacion = "LONG" if direccion == "up" else "SHORT"
+            emoji_op = "🟢" if direccion == "up" else "🔴"
+            precio_actual = patron_btc.get("precio", 0)
+            fuerza = patron_btc.get("fuerza", 0)
+            edad_h = patron_btc.get("edad_h", 0)
+
             send_telegram_message(
-                f"🔥 EXPANSIÓN BTC DETECTADA\n"
+                f"🔥 EXPANSIÓN {direccion.upper()} — {emoji_op} {operacion} BTC\n"
                 f"━━━━━━━━━━━━━━━━━━━\n"
-                f"   {patron_btc['detalle']}\n"
+                f"📍 Precio: ${precio_actual:,.2f}\n"
+                f"📊 Fuerza: {fuerza:.1f}x hace {edad_h:.1f}h\n"
+                f"🎯 Dirección: {operacion}\n"
                 f"✅ Filtro pasa → analizando monedas...\n"
                 f"🕐 {ahora_lima_str} (Lima)"
             )
