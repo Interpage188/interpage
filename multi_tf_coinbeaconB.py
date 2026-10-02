@@ -46,6 +46,7 @@ STATE_FILE = DATA_DIR / "multi_tf_coinbeaconB_state.json"
 CSV_FILE = DATA_DIR / "multi_tf_coinbeaconB.csv"
 HISTORICO_CSV_FILE = DATA_DIR / "historial_lineas_B.csv"
 CORRELACION_CSV_FILE = DATA_DIR / "correlacion_btc_alt_B.csv"
+PATRON_STATE_FILE = DATA_DIR / "patron_btc_ultimo_estado.json"
 
 LIMA_OFFSET = timedelta(hours=-5)
 HORA_INICIO = 0
@@ -54,12 +55,12 @@ HORA_FIN = 24
 # ============================================================
 # FILTRO 1 — COMPRESIÓN → EXPANSIÓN BTC
 # ============================================================
-COMP_VENTANA          = 4       # arrancar bajo, subir a 6 con histórico
-COMP_MIN_VELAS        = 12      # arrancar bajo, subir a 40 con histórico
+COMP_VENTANA          = 4
+COMP_MIN_VELAS        = 12
 COMP_RATIO_COMPRESION = 0.70
 COMP_FACTOR_EXPANSION = 3.0
 COMP_HORAS_RECIENTE   = 6
-COMP_MODO_FILTRO      = "hard"  # "hard" bloquea | "soft" solo avisa
+COMP_MODO_FILTRO      = "hard"
 
 
 def hora_permite_envio():
@@ -83,9 +84,6 @@ COINGECKO_IDS = {
     "STX": "blockstack", "DASH": "dash",
 }
 
-# ============================================================
-# CACHE REMOTO — TU repo interpage
-# ============================================================
 CACHE_REMOTE_BASE = (
     "https://raw.githubusercontent.com/Interpage188/"
     "interpage/main/data/cache"
@@ -151,7 +149,7 @@ def extraer_rsi_del_cache(cache, incluir_4h=False):
 
 
 # ============================================================
-# FILTRO 1 — COMPRESIÓN → EXPANSIÓN
+# FILTRO 1 — COMPRESIÓN → EXPANSIÓN (funciones)
 # ============================================================
 
 def _media(xs):
@@ -161,8 +159,6 @@ def _media(xs):
 def construir_velas_de_cache(cache):
     if not cache:
         return []
-
-    # 1) Preferir velas_5m reales (OHLC de OKX)
     velas_raw = cache.get("velas_5m") or []
     if velas_raw:
         velas = []
@@ -180,7 +176,6 @@ def construir_velas_de_cache(cache):
         if velas:
             return velas
 
-    # 2) Fallback: pulso (snapshots)
     pulso = cache.get("pulso") or []
     datos = []
     for p in pulso:
@@ -241,6 +236,25 @@ def analizar_patron_btc(btc_cache):
             "detalle": f"rango normal ({ratio:.2f}x)"}
 
 
+def cargar_ultimo_patron():
+    if not PATRON_STATE_FILE.exists():
+        return None
+    try:
+        with PATRON_STATE_FILE.open("r", encoding="utf-8") as f:
+            return json.load(f).get("estado")
+    except Exception:
+        return None
+
+
+def guardar_ultimo_patron(estado):
+    try:
+        with PATRON_STATE_FILE.open("w", encoding="utf-8") as f:
+            json.dump({"estado": estado,
+                       "updated_at": datetime.now(timezone.utc).isoformat()}, f)
+    except Exception as e:
+        print(f"⚠️ No se pudo guardar estado patrón: {e}", flush=True)
+
+
 # ============================================================
 # PUMP/DUMP
 # ============================================================
@@ -248,7 +262,6 @@ def analizar_patron_btc(btc_cache):
 def consultar_pumping_events():
     token = os.environ.get("COINBEACON_TOKEN")
     if not token:
-        print("   ⚠️ COINBEACON_TOKEN no disponible", flush=True)
         return []
     types = "pump_5m,dump_5m"
     url = f"{COINBEACON_PUMPING_URL}?exchange=binance&types={types}&pair=USDT&limit=500"
@@ -267,8 +280,7 @@ def consultar_pumping_events():
 def indexar_pumping_events(eventos):
     index = {}
     for ev in eventos:
-        symbol_full = ev.get("symbol", "")
-        symbol_base = symbol_full.replace("USDT", "")
+        symbol_base = ev.get("symbol", "").replace("USDT", "")
         tipo = ev.get("type", "")
         spotted_at = ev.get("spottedAt", 0)
         if symbol_base not in index:
@@ -286,13 +298,11 @@ def pd_para_symbol(symbol, pd_index):
     if symbol not in pd_index:
         return resultado
     ahora_ts = datetime.now(timezone.utc).timestamp()
-    mejor = None
-    mejor_ts = 0
+    mejor, mejor_ts = None, 0
     for tipo, ev in pd_index[symbol].items():
         spotted_at = ev.get("spottedAt", 0)
         if spotted_at > mejor_ts:
-            mejor = ev
-            mejor_ts = spotted_at
+            mejor, mejor_ts = ev, spotted_at
     if not mejor:
         return resultado
     edad_min = (ahora_ts * 1000 - mejor_ts) / 60000
@@ -387,15 +397,9 @@ def clasificar_estructura(touches):
 
 def obtener_touch_score(touches):
     if touches < 4: return 0
-    if touches == 4: return 8
-    if touches == 5: return 12
-    if touches == 6: return 16
-    if touches == 7: return 20
-    if touches == 8: return 25
-    if touches == 9: return 28
-    if touches == 10: return 31
+    tabla = {4:8, 5:12, 6:16, 7:20, 8:25, 9:28, 10:31}
     if touches >= 11: return 35 + min((touches - 11) * 2, 15)
-    return 0
+    return tabla.get(touches, 0)
 
 
 def obtener_proximidad_score(distance_pct, timeframe):
@@ -425,12 +429,9 @@ def obtener_status_score(status):
 def obtener_confidence_score(confidence):
     if confidence is None:
         return 0
-    if confidence <= 1:
-        normalized = confidence * 100
-    elif confidence <= 10:
-        normalized = confidence * 10
-    else:
-        normalized = confidence
+    if confidence <= 1: normalized = confidence * 100
+    elif confidence <= 10: normalized = confidence * 10
+    else: normalized = confidence
     normalized = max(0, min(100, normalized))
     return (normalized / 100) * 20
 
@@ -478,7 +479,6 @@ def analizar_coinbeacon(symbol):
             print(f"   ❌ {timeframe}: {e}", flush=True)
 
     if not todas:
-        print("❌ Sin líneas.", flush=True)
         return {"price": None, "lines": []}
 
     precio = None
@@ -489,8 +489,6 @@ def analizar_coinbeacon(symbol):
 
     if precio is not None:
         print(f"💰 Precio: ${precio:.6f}", flush=True)
-    else:
-        print("💰 Precio: N/A", flush=True)
 
     for linea in todas:
         linea["distance_pct"] = distancia_porcentual(precio, linea.get("currentLevel"))
@@ -499,25 +497,6 @@ def analizar_coinbeacon(symbol):
         else:
             linea["structure_quality"] = "UNKNOWN"
             linea["total_score"] = 0
-
-    soportes = sorted([l for l in todas if l.get("type") == "support" and l.get("distance_pct", 0) < 0],
-                      key=lambda x: abs(x["distance_pct"]))
-    resistencias = sorted([l for l in todas if l.get("type") == "resistance" and l.get("distance_pct", 0) > 0],
-                          key=lambda x: abs(x["distance_pct"]))
-
-    print("\n🟢 SOPORTES", flush=True)
-    if not soportes:
-        print("   Ninguno.", flush=True)
-    else:
-        for l in soportes[:3]:
-            print(f"   {l['timeframe']} | ${l['currentLevel']:.6f} | {l['distance_pct']:+.2f}% | {l['touchCount']}t | {l.get('status','')} | {l['structure_quality']}", flush=True)
-
-    print("\n🔴 RESISTENCIAS", flush=True)
-    if not resistencias:
-        print("   Ninguna.", flush=True)
-    else:
-        for l in resistencias[:3]:
-            print(f"   {l['timeframe']} | ${l['currentLevel']:.6f} | {l['distance_pct']:+.2f}% | {l['touchCount']}t | {l.get('status','')} | {l['structure_quality']}", flush=True)
 
     return {"price": precio, "lines": todas}
 
@@ -570,19 +549,13 @@ def calcular_rsi(prices, period=14):
 
 
 def analizar_rsi_coingecko(symbol, incluir_4h=False):
-    print(f"\n📊 RSI — {symbol}", flush=True)
-    print("=" * 70, flush=True)
     cache = leer_cache_remoto(symbol)
     if cache:
-        print(f"   📦 Cache: RSI15={cache['rsi15']} | RSI1h={cache['rsi1h']} | "
-              f"RSI4h={cache['rsi4h']} | {cache['n_muestras']} muestras", flush=True)
         return extraer_rsi_del_cache(cache, incluir_4h)
 
-    print("   ⚠️ Sin cache → CoinGecko", flush=True)
     try:
         prices = obtener_precios_coingecko(symbol, days=7)
-    except Exception as e:
-        print(f"   ⚠️ CG error {symbol}: {e}", flush=True)
+    except Exception:
         return {}
     if not prices:
         return {}
@@ -614,9 +587,6 @@ def evaluar_rsi(datos, mostrar=True):
         return False, "Incompleto"
     cumple_1h = rsi1 > 30
     cumple_15m = rsi15 > 30
-    if mostrar:
-        print(f"\n🧠 RSI: 1h={rsi1:.2f} {'✅' if cumple_1h else '❌'} | "
-              f"15m={rsi15:.2f} {'✅' if cumple_15m else '❌'}", flush=True)
     return (cumple_1h and cumple_15m), f"1h={rsi1:.2f} | 15m={rsi15:.2f}"
 
 
@@ -636,17 +606,11 @@ def evaluar_btc_rsi(btc_rsi_data, rsi4_anterior=None, mostrar=True):
     cumple_15m = rsi15 > 30
     tendencia_alcista = rsi4_anterior is not None and rsi4 > rsi4_anterior
     btc_ok = (cumple_4h and cumple_1h and cumple_15m) or (tendencia_alcista and cumple_1h and cumple_15m)
-    if mostrar:
-        print(f"\n🧠 BTC RSI: 4h={rsi4:.2f} 1h={rsi1:.2f} 15m={rsi15:.2f} → "
-              f"{'🟢 CUMPLE' if btc_ok else '🔴 NO CUMPLE'}", flush=True)
     return (True, "favorable") if btc_ok else (False, "desfavorable")
 
 
 def analizar_contexto_btc(btc_coin_data, btc_rsi_data, rsi4_anterior=None,
                           btc_cache=None, prev_btc=None):
-    print("\n🌐 CONTEXTO BTC", flush=True)
-    print("=" * 70, flush=True)
-
     precio_btc = None
     for tf in ["4h", "1h", "15m"]:
         d = btc_rsi_data.get(tf)
@@ -655,14 +619,12 @@ def analizar_contexto_btc(btc_coin_data, btc_rsi_data, rsi4_anterior=None,
             break
     if precio_btc is None:
         precio_btc = btc_coin_data.get("price")
-    if precio_btc:
-        print(f"💰 BTC: ${precio_btc:,.2f}", flush=True)
 
     rsi15 = btc_rsi_data.get("15m", {}).get("rsi14") if btc_rsi_data.get("15m") else None
     rsi1  = btc_rsi_data.get("1h", {}).get("rsi14")  if btc_rsi_data.get("1h")  else None
     rsi4  = btc_rsi_data.get("4h", {}).get("rsi14")  if btc_rsi_data.get("4h")  else None
 
-    btc_rsi_ok, estado = evaluar_btc_rsi(btc_rsi_data, rsi4_anterior, mostrar=True)
+    btc_rsi_ok, estado = evaluar_btc_rsi(btc_rsi_data, rsi4_anterior, mostrar=False)
 
     delta_2h = None
     if rsi4 is not None and rsi4_anterior is not None:
@@ -677,7 +639,6 @@ def analizar_contexto_btc(btc_coin_data, btc_rsi_data, rsi4_anterior=None,
     if rsi15 is not None and rsi1 is not None:
         subida_15m = (rsi15_prev is not None and (rsi15 - rsi15_prev) >= SALTO_15M)
         bajada_15m = (rsi15_prev is not None and (rsi15_prev - rsi15) >= SALTO_15M)
-
         if (rsi15 >= RSI15_ALTO and rsi1 >= RSI1_ALTO) or subida_15m:
             impulso_up_corto = True
         if (rsi15 <= RSI15_BAJO and rsi1 <= RSI1_BAJO) or bajada_15m:
@@ -691,7 +652,6 @@ def analizar_contexto_btc(btc_coin_data, btc_rsi_data, rsi4_anterior=None,
     RSI_BAJA_SALUDABLE = 48.0
     RSI_CENTRAL = 52.0
     RSI_SOBRECOMPRA = 65.0
-
     D_UP_FUERTE, D_UP_INDECISO = 0.34, 0.10
     D_DOWN_INDECISO, D_DOWN_FUERTE = -0.10, -0.34
 
@@ -786,11 +746,7 @@ def analizar_contexto_btc(btc_coin_data, btc_rsi_data, rsi4_anterior=None,
         else:
             razon = "sobreventa neutro"
 
-    print(f"\n🧭 BTC {btc_dir.upper()} {btc_modo.upper()} ({razon})", flush=True)
-    print(f"   RSI4h={rsi4:.2f} RSI1h={rsi1:.2f} RSI15m={rsi15:.2f}" if all(x is not None for x in [rsi4, rsi1, rsi15]) else "   RSI N/A", flush=True)
-
     estado_btc = "FAVORABLE" if btc_rsi_ok else "DESFAVORABLE"
-    print(f"📊 ESTADO BTC: {estado_btc}", flush=True)
 
     return {
         "price": precio_btc, "rsi_ok": btc_rsi_ok, "estado": estado_btc,
@@ -804,17 +760,15 @@ def analizar_contexto_btc(btc_coin_data, btc_rsi_data, rsi4_anterior=None,
 
 
 # ============================================================
-# TELEGRAM, CSV, ESTADO
+# TELEGRAM
 # ============================================================
 
 def send_telegram_message(message):
     if not hora_permite_envio():
-        print("Fuera de horario.", flush=True)
         return False
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
-        print("Telegram no configurado.", flush=True)
         return False
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     data = f"chat_id={urllib.parse.quote(str(chat_id))}&text={urllib.parse.quote(message)}".encode("utf-8")
@@ -825,14 +779,17 @@ def send_telegram_message(message):
         with urllib.request.urlopen(req, timeout=20) as response:
             result = json.loads(response.read().decode("utf-8"))
         if result.get("ok"):
-            print("Telegram enviado.", flush=True)
+            print("   📢 Telegram enviado", flush=True)
             return True
-        print(f"Telegram devolvió: {result}", flush=True)
         return False
     except Exception as e:
-        print(f"Error Telegram: {e}", flush=True)
+        print(f"   ⚠️ Error Telegram: {e}", flush=True)
         return False
 
+
+# ============================================================
+# CSV, ESTADO
+# ============================================================
 
 def guardar_en_csv(alert_data):
     fieldnames = [
@@ -897,16 +854,10 @@ def _prioridad_patron(linea):
 
 
 def analizar_confluencia(symbol, coin_data, rsi_data, volume_by_symbol, btc_context, pd_index=None):
-    print(f"\n🎯 CONFLUENCIA — {symbol}", flush=True)
-    print("=" * 70, flush=True)
-
     precio = coin_data.get("price")
     lineas = coin_data.get("lines", [])
     if precio is None:
-        print("❌ Sin precio.", flush=True)
         return []
-
-    evaluar_rsi(rsi_data, mostrar=True)
 
     btc_dir = btc_context.get("btc_dir", "flat")
     btc_modo = btc_context.get("btc_modo", "neutro")
@@ -920,7 +871,6 @@ def analizar_confluencia(symbol, coin_data, rsi_data, volume_by_symbol, btc_cont
     tendencia_1h = rsi_data.get("1h", {}).get("tendencia") if rsi_data else None
 
     if btc_modo == "neutro":
-        print(f"   ⏸️ BTC NEUTRO", flush=True)
         return []
 
     operacion_permitida = "LONG" if btc_dir == "up" else "SHORT"
@@ -1082,18 +1032,13 @@ def procesar_alertas(alerts, filtered_previous, btc_context, pd_index):
         if alert.get("pd_confirmado"): tags.append("🔥 PD CONFIRMADO")
         tag_text = " ".join(tags) if tags else ""
 
-        rsi1h = alert.get('rsi1h')
-        rsi15m = alert.get('rsi15m')
-        rsi1h_str = f"{rsi1h:.2f}" if rsi1h is not None else "N/A"
-        rsi15m_str = f"{rsi15m:.2f}" if rsi15m is not None else "N/A"
-
-        btc_rsi4h = alert.get('btc_rsi4h')
-        btc_rsi4h_str = f"{btc_rsi4h:.2f}" if btc_rsi4h is not None else "N/A"
+        rsi1h_str = f"{alert.get('rsi1h'):.2f}" if alert.get('rsi1h') is not None else "N/A"
+        rsi15m_str = f"{alert.get('rsi15m'):.2f}" if alert.get('rsi15m') is not None else "N/A"
+        btc_rsi4h_str = f"{alert.get('btc_rsi4h'):.2f}" if alert.get('btc_rsi4h') is not None else "N/A"
 
         btc_dir_str = alert.get("btc_dir", "flat").upper()
         btc_modo_str = alert.get("btc_modo", "neutro").upper()
         btc_razon = alert.get("btc_razon", "neutro")
-
         delta_2h_val = btc_context.get("delta_2h")
         delta_2h_txt = f"{delta_2h_val:+.2f}" if delta_2h_val is not None else "N/A"
 
@@ -1174,8 +1119,6 @@ def procesar_alertas(alerts, filtered_previous, btc_context, pd_index):
 
 
 def analizar_moneda(symbol, volume_by_symbol, btc_context, btc_rsi_data, hora_lima, pd_index=None):
-    print(f"\n🔍 {symbol}", flush=True)
-    print("#" * 70, flush=True)
     coin_data = analizar_coinbeacon(symbol)
     rsi_data = analizar_rsi_coingecko(symbol, incluir_4h=False)
     alerts = analizar_confluencia(symbol, coin_data, rsi_data, volume_by_symbol, btc_context, pd_index)
@@ -1188,20 +1131,50 @@ def main():
     print("=" * 70, flush=True)
     print(f"\nHora UTC: {datetime.now(timezone.utc).isoformat()}", flush=True)
 
+    # ============================================================
     # FILTRO 1
+    # ============================================================
     print("\n🔍 FILTRO 1: compresión→expansión BTC...", flush=True)
     btc_cache_full = leer_cache_remoto(BTC_SYMBOL)
     patron_btc = analizar_patron_btc(btc_cache_full)
     print(f"   Estado:  {patron_btc['estado'].upper()}", flush=True)
     print(f"   Detalle: {patron_btc['detalle']}", flush=True)
 
+    # ============================================================
+    # AVISO INTELIGENTE: solo cuando CAMBIA el estado
+    # ============================================================
+    estado_actual = patron_btc["estado"]
+    estado_anterior = cargar_ultimo_patron()
+    cambio_estado = (estado_actual != estado_anterior)
+    guardar_ultimo_patron(estado_actual)
+
+    if cambio_estado:
+        if estado_actual == "comprimiendo":
+            send_telegram_message(
+                f"🌀 COMPRESIÓN BTC DETECTADA\n"
+                f"━━━━━━━━━━━━━━━━━━━\n"
+                f"   {patron_btc['detalle']}\n"
+                f"⏳ Esperando ruptura (UP o DOWN)\n"
+                f"🕐 {datetime.now(timezone.utc).strftime('%H:%M')} UTC"
+            )
+        elif estado_actual == "expandiendo":
+            send_telegram_message(
+                f"🔥 EXPANSIÓN BTC DETECTADA\n"
+                f"━━━━━━━━━━━━━━━━━━━\n"
+                f"   {patron_btc['detalle']}\n"
+                f"✅ Filtro pasa → analizando monedas...\n"
+                f"🕐 {datetime.now(timezone.utc).strftime('%H:%M')} UTC"
+            )
+
     if COMP_MODO_FILTRO == "hard" and not patron_btc["pasa"]:
-        # Silencio total cuando no hay patrón
-        print(f"\n⏸️ Filtro no pasó ({patron_btc['estado'].upper()}) — abortando en silencio", flush=True)
+        print(f"\n⏸️ Filtro no pasó ({estado_actual.upper()}) — abortando en silencio", flush=True)
         return
 
     print("✅ Filtro pasó\n", flush=True)
 
+    # ============================================================
+    # FLUJO NORMAL
+    # ============================================================
     previous_state = cargar_estado()
     rsi4_anterior = None
     prev_btc = {}
@@ -1212,10 +1185,6 @@ def main():
                         "rsi15": item.get("rsi15")}
             break
 
-    print("#" * 70, flush=True)
-    print("🌐 CONTEXTO BTC", flush=True)
-    print("#" * 70, flush=True)
-
     btc_coin_data = analizar_coinbeacon(BTC_SYMBOL)
     btc_rsi_data = (extraer_rsi_del_cache(btc_cache_full, incluir_4h=True)
                     if btc_cache_full
@@ -1224,24 +1193,15 @@ def main():
                                         btc_cache_full, prev_btc=prev_btc)
     btc_context["patron_btc"] = patron_btc
 
-    print("\n" + "#" * 70, flush=True)
-    print("📡 PUMP/DUMP EVENTS", flush=True)
-    print("#" * 70, flush=True)
     pd_eventos = consultar_pumping_events()
-    print(f"   Eventos: {len(pd_eventos)}", flush=True)
     pd_index = indexar_pumping_events(pd_eventos)
-    print(f"   Símbolos: {len(pd_index)}", flush=True)
 
-    print("\n" + "#" * 70, flush=True)
-    print("📊 VOLUMEN COINBEACON", flush=True)
-    print("#" * 70, flush=True)
     try:
         volume_data = consultar_volume_coinbeacon()
     except Exception as e:
-        print(f"❌ {e}", flush=True)
+        print(f"❌ Volumen: {e}", flush=True)
         volume_data = []
     volume_by_symbol = {str(i.get("symbol", "")).upper(): i for i in volume_data}
-    print(f"   {len(volume_data)} items", flush=True)
 
     now_ts = datetime.now(timezone.utc).timestamp()
     filtered_previous = limpiar_estado(previous_state, now_ts)
@@ -1272,9 +1232,8 @@ def main():
     print("\n" + "=" * 70, flush=True)
     print("📢 RESULTADO FINAL", flush=True)
     print("=" * 70, flush=True)
-    print(f"Alertas nuevas: {sent_count}", flush=True)
-    print(f"🟢 LONG: {long_count} | 🔴 SHORT: {short_count}", flush=True)
-    print(f"🎯 Patrón: {patron_btc['estado'].upper()}", flush=True)
+    print(f"Alertas: {sent_count} | LONG: {long_count} | SHORT: {short_count}", flush=True)
+    print(f"Patrón: {patron_btc['estado'].upper()}", flush=True)
     print("\n🏁 PROGRAMA TERMINADO", flush=True)
 
 
