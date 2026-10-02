@@ -5,8 +5,8 @@ permissions:
 
 on:
   schedule:
-    # Cada 30 min: :20 y :50
-    - cron: '20,50 * * * *'
+    # Cada 15 min: :05, :20, :35, :50
+    - cron: '5,20,35,50 * * * *'
   workflow_dispatch:
 
 concurrency:
