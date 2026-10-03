@@ -5,8 +5,7 @@ permissions:
 
 on:
   schedule:
-    # Cada 5 min
-    - cron: '*/5 * * * *'
+    - cron: '*/5 11-23,0-3 * * *'   # 6am - 11pm Lima
   workflow_dispatch:
 
 concurrency:
