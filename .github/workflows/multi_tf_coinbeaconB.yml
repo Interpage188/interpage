@@ -1,15 +1,12 @@
 name: MULTI TF COINBEACON B
 
-permissions:
-  contents: write
-
 on:
   schedule:
-    # Cada 15 min: :05, :20, :35, :50
-    - cron: '5,20,35,50 * * * *'
-    # Cada 5 min
     - cron: '*/5 * * * *'
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 concurrency:
   group: multi-tf-coinbeaconB
@@ -18,6 +15,7 @@ concurrency:
 jobs:
   monitor:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -29,59 +27,62 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install dependencies
+      - name: Verify Python
         run: |
-          pip install --upgrade pip
-          pip install requests
-
-      - name: Verify multi_tf_coinbeaconB.py exists
-        run: |
-          if [ ! -f multi_tf_coinbeaconB.py ]; then
-            echo "❌ multi_tf_coinbeaconB.py no encontrado"
-            exit 1
-          fi
-          echo "✅ multi_tf_coinbeaconB.py encontrado"
-
-      - name: Check Python syntax
-        run: |
+          python --version
           python -m py_compile multi_tf_coinbeaconB.py
-          echo "✅ Python syntax OK"
+          echo "✅ Python OK"
 
       - name: Run MULTI TF COINBEACON B
         env:
           COINBEACON_TOKEN: ${{ secrets.COINBEACON_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python multi_tf_coinbeaconB.py
+        run: |
+          echo "========================================"
+          echo "🚀 INICIO COINBEACON B"
+          date -u
+          echo "========================================"
+
+          python -u multi_tf_coinbeaconB.py
+
+          echo "========================================"
+          echo "🏁 FIN COINBEACON B"
+          date -u
+          echo "========================================"
 
       - name: Commit historical data
         if: always()
         run: |
           git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          if [ -f data/multi_tf_coinbeaconB.csv ]; then git add data/multi_tf_coinbeaconB.csv; fi
-          if [ -f data/multi_tf_coinbeaconB_state.json ]; then git add data/multi_tf_coinbeaconB_state.json; fi
-          if [ -f data/historial_lineas_B.csv ]; then git add data/historial_lineas_B.csv; fi
-          if [ -f data/correlacion_btc_alt_B.csv ]; then git add data/correlacion_btc_alt_B.csv; fi
-          if [ -f data/patron_btc_ultimo_estado.json ]; then git add data/patron_btc_ultimo_estado.json; fi
-          if [ -f data/multi_tf_coinbeaconB_throttle.json ]; then git add data/multi_tf_coinbeaconB_throttle.json; fi
+          git add \
+            data/multi_tf_coinbeaconB.csv \
+            data/multi_tf_coinbeaconB_state.json \
+            data/historial_lineas_B.csv \
+            data/correlacion_btc_alt_B.csv \
+            data/multi_tf_coinbeaconB_throttle.json \
+            2>/dev/null || true
 
-          if git diff --staged --quiet; then
-            echo "📭 No hay cambios."
-          else
-            git commit -m "Actualizar Multi-TF CoinBeaconB [skip ci]"
-            git pull --rebase origin main || true
-            git push || echo "⚠️ Push falló"
-            for i in 1 2 3; do
-              git pull --rebase origin main && break
-              echo "⚠️ Pull intento $i falló, reintentando..."
-              sleep 5
-            done
-            for i in 1 2 3; do
-              git push && echo "✅ Push OK" && break
-              echo "⚠️ Push intento $i falló, reintentando..."
-              git pull --rebase origin main || true
-              sleep 10
-            done
+          if git diff --cached --quiet; then
+            echo "📭 No hay cambios para guardar."
+            exit 0
           fi
+
+          git commit -m "Actualizar Multi-TF CoinBeaconB"
+
+          for i in 1 2 3; do
+            echo "🔄 Push intento $i..."
+
+            git pull --rebase origin main && \
+            git push origin HEAD:main && \
+            echo "✅ Push OK" && \
+            exit 0
+
+            echo "⚠️ Push falló."
+            sleep 10
+          done
+
+          echo "❌ No se pudo hacer push después de 3 intentos."
+          exit 1
