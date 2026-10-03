@@ -2,7 +2,7 @@ name: MULTI TF COINBEACON B
 
 on:
   schedule:
-    - cron: '10,25,40,55 * * * *'
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 permissions:
