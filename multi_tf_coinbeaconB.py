@@ -1100,7 +1100,7 @@ def procesar_alertas(alerts, filtered_previous, btc_context, pd_index):
         patron_linea = f"{flecha_pat} Patrón: {pat_estado} — {pat_det}"
 
         msg = (
-            f"📊 MULTI TF COINBEACON B\n"
+            f"🧠 MULTI TF\n"
             f"{emoji} {operacion} {symbol}\n"
             f"📈 Precio: ${precio_actual:.6f}\n"
             f"📉 {tipo_linea}{flip_text} ({inclinacion})\n"
@@ -1199,6 +1199,7 @@ def main():
 
         if estado_actual == "comprimiendo":
             send_telegram_message(
+                f"🧠 MULTI TF\n"
                 f"🌀 COMPRESIÓN BTC DETECTADA\n"
                 f"━━━━━━━━━━━━━━━━━━━\n"
                 f"   {patron_btc['detalle']}\n"
@@ -1214,6 +1215,7 @@ def main():
             edad_h = patron_btc.get("edad_h", 0)
 
             send_telegram_message(
+                f"🧠 MULTI TF\n"
                 f"🔥 EXPANSIÓN {direccion.upper()} — {emoji_op} {operacion} BTC\n"
                 f"━━━━━━━━━━━━━━━━━━━\n"
                 f"📍 Precio: ${precio_actual:,.2f}\n"
@@ -1223,6 +1225,7 @@ def main():
                 f"🕐 {ahora_lima_str} (Lima)"
             )
         else:
+            # NEUTRAL o SIN_DATOS — no enviamos
             print(f"   ⏸️ Estado {estado_actual} — throttle guardado, sin envío", flush=True)
     else:
         print("   🔇 Throttle activo — sin envío", flush=True)
