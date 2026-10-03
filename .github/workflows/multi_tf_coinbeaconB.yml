@@ -5,10 +5,10 @@ permissions:
 
 on:
   schedule:
-    # 6am a 7pm Lima (11:00-23:55 UTC)
-    - cron: '*/5 11-23 * * *'
-    # 7pm a 11pm Lima (00:00-03:55 UTC)
-    - cron: '*/5 0-3 * * *'
+    # Cada 15 min: :05, :20, :35, :50
+    - cron: '5,20,35,50 * * * *'
+    # Cada 5 min
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 concurrency:
@@ -34,6 +34,14 @@ jobs:
           pip install --upgrade pip
           pip install requests
 
+      - name: Verify multi_tf_coinbeaconB.py exists
+        run: |
+          if [ ! -f multi_tf_coinbeaconB.py ]; then
+            echo "❌ multi_tf_coinbeaconB.py no encontrado"
+            exit 1
+          fi
+          echo "✅ multi_tf_coinbeaconB.py encontrado"
+
       - name: Check Python syntax
         run: |
           python -m py_compile multi_tf_coinbeaconB.py
@@ -56,12 +64,15 @@ jobs:
           if [ -f data/multi_tf_coinbeaconB_state.json ]; then git add data/multi_tf_coinbeaconB_state.json; fi
           if [ -f data/historial_lineas_B.csv ]; then git add data/historial_lineas_B.csv; fi
           if [ -f data/correlacion_btc_alt_B.csv ]; then git add data/correlacion_btc_alt_B.csv; fi
+          if [ -f data/patron_btc_ultimo_estado.json ]; then git add data/patron_btc_ultimo_estado.json; fi
           if [ -f data/multi_tf_coinbeaconB_throttle.json ]; then git add data/multi_tf_coinbeaconB_throttle.json; fi
 
           if git diff --staged --quiet; then
             echo "📭 No hay cambios."
           else
             git commit -m "Actualizar Multi-TF CoinBeaconB [skip ci]"
+            git pull --rebase origin main || true
+            git push || echo "⚠️ Push falló"
             for i in 1 2 3; do
               git pull --rebase origin main && break
               echo "⚠️ Pull intento $i falló, reintentando..."
