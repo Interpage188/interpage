@@ -5,11 +5,11 @@ permissions:
 
 on:
   schedule:
-    - cron: '2,7,12,17,22,27,32,37,42,47,52,57 * * * *'
+    - cron: '2,17,32,47 * * * *'
   workflow_dispatch:
 
 concurrency:
-  group: repo-main-push
+  group: recolector-interpage
   cancel-in-progress: false
 
 jobs:
@@ -26,55 +26,62 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Check Python syntax (recolector)
+      - name: Check Python syntax
         run: |
           python -m py_compile recolector.py
-          echo "✅ Sintaxis recolector OK"
+          echo "✅ Sintaxis OK"
 
       - name: Run RECOLECTOR
-        run: python recolector.py
+        run: |
+          echo "========================================"
+          echo "🚀 RECOLECTOR"
+          date -u
+          echo "========================================"
+
+          python -u recolector.py
+
+          echo "========================================"
+          echo "🏁 RECOLECTOR TERMINADO"
+          date -u
+          echo "========================================"
 
       - name: Show cache status
         if: always()
         run: |
           echo "📁 Archivos en data/cache/:"
-          ls -la data/cache/ 2>/dev/null | head -20 || echo "(vacío)"
+          ls -lah data/cache/ 2>/dev/null || true
 
-          echo ""
-          echo "📊 Resumen:"
           if [ -d data/cache ]; then
-            total=$(ls data/cache/*.json 2>/dev/null | wc -l)
-            echo "   Archivos cache: $total"
-            du -sh data/cache/ 2>/dev/null
+            echo ""
+            echo "📊 Resumen:"
+            find data/cache -name '*.json' | wc -l
+            du -sh data/cache/ 2>/dev/null || true
           fi
 
       - name: Commit cache
         if: always()
         run: |
           git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          if [ -d data/cache ]; then
-            git add data/cache/
-          fi
+          git add data/cache/ 2>/dev/null || true
 
-          if git diff --staged --quiet; then
+          if git diff --cached --quiet; then
             echo "📭 Sin cambios."
-          else
-            git commit -m "Recolector [skip ci] $(date -u +'%Y-%m-%d %H:%M UTC')"
-
-            # Pull con reintentos
-            for i in 1 2 3; do
-              git pull --rebase origin main && break
-              echo "⚠️ Pull intento $i falló, reintentando en 5s..."
-              sleep 5
-            done
-
-            # Push con reintentos
-            for i in 1 2 3; do
-              git push && echo "✅ Push OK" && break
-              echo "⚠️ Push intento $i falló, reintentando en 10s..."
-              git pull --rebase origin main || true
-              sleep 10
-            done
+            exit 0
           fi
+
+          git commit -m "Recolector [skip ci] $(date -u +'%Y-%m-%d %H:%M UTC')"
+
+          for i in 1 2 3; do
+            git pull --rebase origin main && \
+            git push origin HEAD:main && \
+            echo "✅ Push OK" && \
+            exit 0
+
+            echo "⚠️ Intento $i falló, reintentando..."
+            sleep 10
+          done
+
+          echo "❌ No se pudo hacer push"
+          exit 1
