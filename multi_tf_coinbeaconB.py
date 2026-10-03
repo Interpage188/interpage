@@ -43,13 +43,11 @@ PD_MIN_PCT = 2.0
 DATA_DIR = Path("data")
 DATA_DIR.mkdir(exist_ok=True)
 
-# Archivos para el flujo principal (alertas, RSI)
 STATE_FILE = DATA_DIR / "multi_tf_coinbeaconB_state.json"
 CSV_FILE = DATA_DIR / "multi_tf_coinbeaconB.csv"
 HISTORICO_CSV_FILE = DATA_DIR / "historial_lineas_B.csv"
 CORRELACION_CSV_FILE = DATA_DIR / "correlacion_btc_alt_B.csv"
 
-# Archivo DEDICADO para el throttle (evita conflictos con el state principal)
 THROTTLE_FILE = DATA_DIR / "multi_tf_coinbeaconB_throttle.json"
 THROTTLE_REMOTE = (
     "https://raw.githubusercontent.com/Interpage188/"
@@ -67,10 +65,9 @@ COMP_VENTANA          = 4
 COMP_MIN_VELAS        = 12
 COMP_RATIO_COMPRESION = 0.70
 COMP_FACTOR_EXPANSION = 3.0
-COMP_HORAS_RECIENTE   = 6
+COMP_HORAS_RECIENTE   = 2      # ← CAMBIO 2: era 6, ahora 2 (solo últimas 2h)
 COMP_MODO_FILTRO      = "hard"
 
-# Throttle: no repetir el mismo aviso antes de N minutos
 COMP_THROTTLE_MIN     = 30
 
 
@@ -159,10 +156,6 @@ def extraer_rsi_del_cache(cache, incluir_4h=False):
     return datos
 
 
-# ============================================================
-# FILTRO 1 — COMPRESIÓN → EXPANSIÓN (funciones)
-# ============================================================
-
 def _media(xs):
     return sum(xs) / len(xs) if xs else 0.0
 
@@ -229,7 +222,10 @@ def analizar_patron_btc(btc_cache):
     ratio = r_ult / r_pre
     ahora = datetime.now(timezone.utc).timestamp()
 
-    for k in range(max(0, n - 4), n):
+    # ═══════════════════════════════════════════════════════════
+    # CAMBIO 1: ventana ampliada de 4 a 8 velas (40 min)
+    # ═══════════════════════════════════════════════════════════
+    for k in range(max(0, n - 8), n):
         vela_actual = velas[k]["rango"]
         anteriores = [velas[i]["rango"] for i in range(max(0, k - 6), k)]
         if not anteriores:
@@ -258,15 +254,6 @@ def analizar_patron_btc(btc_cache):
             "detalle": f"rango normal ({ratio:.2f}x)"}
 
 
-# ============================================================
-# THROTTLE (archivo dedicado, no mezclado con el state principal)
-# ============================================================
-# Devuelve:
-#   {"ok": True,  "estado": "...", "ts": ...}  → lectura OK
-#   {"ok": True,  "estado": None, "ts": 0}     → archivo no existe (primera vez)
-#   {"ok": False, "estado": None, "ts": 0}     → error de lectura
-# ============================================================
-
 def cargar_throttle():
     try:
         req = urllib.request.Request(
@@ -281,7 +268,6 @@ def cargar_throttle():
         }
     except urllib.error.HTTPError as e:
         if e.code == 404:
-            # Archivo no existe → primera vez, es válido
             return {"ok": True, "estado": None, "ts": 0}
         print(f"   ⚠️ throttle HTTP error {e.code}", flush=True)
         return {"ok": False, "estado": None, "ts": 0}
@@ -291,7 +277,6 @@ def cargar_throttle():
 
 
 def guardar_throttle(estado):
-    """Escribe el throttle en su archivo dedicado. El workflow lo commitea."""
     try:
         with THROTTLE_FILE.open("w", encoding="utf-8") as f:
             json.dump({
@@ -836,7 +821,7 @@ def send_telegram_message(message):
 
 
 # ============================================================
-# CSV, ESTADO (alertas + RSI solamente)
+# CSV, ESTADO
 # ============================================================
 
 def guardar_en_csv(alert_data):
@@ -1179,25 +1164,18 @@ def main():
     print("=" * 70, flush=True)
     print(f"\nHora UTC: {datetime.now(timezone.utc).isoformat()}", flush=True)
 
-    # ============================================================
-    # FILTRO 1
-    # ============================================================
     print("\n🔍 FILTRO 1: compresión→expansión BTC...", flush=True)
     btc_cache_full = leer_cache_remoto(BTC_SYMBOL)
     patron_btc = analizar_patron_btc(btc_cache_full)
     print(f"   Estado:  {patron_btc['estado'].upper()}", flush=True)
     print(f"   Detalle: {patron_btc['detalle']}", flush=True)
 
-    # ============================================================
-    # AVISO INTELIGENTE — con manejo robusto de errores
-    # ============================================================
     estado_actual = patron_btc["estado"]
     ahora_ts = datetime.now(timezone.utc).timestamp()
 
     lectura = cargar_throttle()
 
     if not lectura["ok"]:
-        # NO pudimos leer el estado remoto. NO enviamos para no duplicar.
         print("   ⚠️ No se pudo leer el throttle remoto → NO se enviará aviso", flush=True)
         debe_avisar = False
     else:
@@ -1205,7 +1183,6 @@ def main():
         ts_anterior = lectura["ts"]
 
         if estado_anterior is None:
-            # Primera vez que corre. Enviar y guardar.
             print("   📭 Throttle no existe → primera vez, se enviará", flush=True)
             debe_avisar = True
         else:
@@ -1246,8 +1223,6 @@ def main():
                 f"🕐 {ahora_lima_str} (Lima)"
             )
         else:
-            # NEUTRAL o SIN_DATOS — no enviamos, pero guardamos el estado
-            # para que no se repita en la próxima corrida.
             print(f"   ⏸️ Estado {estado_actual} — throttle guardado, sin envío", flush=True)
     else:
         print("   🔇 Throttle activo — sin envío", flush=True)
@@ -1258,9 +1233,6 @@ def main():
 
     print("✅ Filtro pasó\n", flush=True)
 
-    # ============================================================
-    # FLUJO NORMAL
-    # ============================================================
     previous_state = cargar_estado()
     rsi4_anterior = None
     prev_btc = {}
