@@ -13,7 +13,7 @@ from pathlib import Path
 import requests
 
 # ============================================================
-# MULTI TF COINBEACON B — FIX 9 + PD + FILTRO COMPRESIÓN
+# MULTI TF COINBEACON B — FIX 10 + MOMENTUM + ADX
 # ============================================================
 
 SYMBOLS = [
@@ -65,10 +65,24 @@ COMP_VENTANA          = 4
 COMP_MIN_VELAS        = 12
 COMP_RATIO_COMPRESION = 0.70
 COMP_FACTOR_EXPANSION = 3.0
-COMP_HORAS_RECIENTE   = 2      # ← CAMBIO 2: era 6, ahora 2 (solo últimas 2h)
+COMP_HORAS_RECIENTE   = 2
 COMP_MODO_FILTRO      = "hard"
 
 COMP_THROTTLE_MIN     = 30
+
+# ============================================================
+# CONFIGURACIÓN SQUEEZE MOMENTUM (LazyBear) — parámetros por defecto
+# ============================================================
+SQZ_BB_LENGTH = 20      # Bollinger Bands length
+SQZ_BB_MULT   = 2.0     # Bollinger Bands multiplier
+SQZ_KC_LENGTH = 20      # Keltner Channels length
+SQZ_KC_MULT   = 1.5     # Keltner Channels multiplier
+
+# ============================================================
+# CONFIGURACIÓN ADX — umbral de fuerza de tendencia
+# ============================================================
+ADX_LENGTH = 14
+ADX_UMBRAL = 23.0       # para BTC: 22-23 según literatura
 
 
 def hora_permite_envio():
@@ -98,6 +112,10 @@ CACHE_REMOTE_BASE = (
 )
 CACHE_MAX_EDAD_MIN = 40
 
+
+# ============================================================
+# CACHE REMOTO
+# ============================================================
 
 def leer_cache_remoto(symbol):
     url = f"{CACHE_REMOTE_BASE}/{symbol}.json"
@@ -160,26 +178,44 @@ def _media(xs):
     return sum(xs) / len(xs) if xs else 0.0
 
 
+# ============================================================
+# CONSTRUCCIÓN DE VELAS (con high/low/volumen)
+# ============================================================
+
 def construir_velas_de_cache(cache):
+    """
+    Extrae las velas de 5m del cache remoto.
+    Incluye open, high, low, close, volumen y rango.
+    """
     if not cache:
         return []
+
     velas_raw = cache.get("velas_5m") or []
+
     if velas_raw:
         velas = []
         for v in velas_raw:
             try:
-                o, c = float(v.get("o")), float(v.get("c"))
-            except (TypeError, ValueError):
+                o = float(v["o"])
+                c = float(v["c"])
+                h = float(v.get("h", max(o, c)))
+                l = float(v.get("l", min(o, c)))
+                vol = v.get("v")
+            except (TypeError, ValueError, KeyError):
                 continue
             velas.append({
                 "timestamp": v["ts"] / 1000,
                 "open":  o,
                 "close": c,
+                "high":  h,
+                "low":   l,
+                "volumen": vol,
                 "rango": abs(c - o),
             })
         if velas:
             return velas
 
+    # Fallback: usar pulso si no hay velas_5m
     pulso = cache.get("pulso") or []
     datos = []
     for p in pulso:
@@ -195,17 +231,205 @@ def construir_velas_de_cache(cache):
             "timestamp": datos[i][0],
             "open":  datos[i - 1][1],
             "close": datos[i][1],
+            "high":  max(datos[i - 1][1], datos[i][1]),
+            "low":   min(datos[i - 1][1], datos[i][1]),
+            "volumen": None,
             "rango": abs(datos[i][1] - datos[i - 1][1]),
         }
         for i in range(1, len(datos))
     ]
 
 
+# ============================================================
+# SQUEEZE MOMENTUM (LazyBear) — implementación Python pura
+# ============================================================
+
+def _sma(serie, length):
+    if len(serie) < length:
+        return None
+    return sum(serie[-length:]) / length
+
+
+def _stdev(serie, length):
+    if len(serie) < length:
+        return None
+    ventana = serie[-length:]
+    m = sum(ventana) / length
+    return (sum((x - m) ** 2 for x in ventana) / length) ** 0.5
+
+
+def _linreg_value(y):
+    """Valor de la recta de regresión en el último punto."""
+    n = len(y)
+    if n < 2:
+        return y[-1] if y else 0.0
+    x_mean = (n - 1) / 2.0
+    y_mean = sum(y) / n
+    num = sum((i - x_mean) * (y[i] - y_mean) for i in range(n))
+    den = sum((i - x_mean) ** 2 for i in range(n))
+    if den == 0:
+        return y[-1]
+    slope = num / den
+    return y_mean + slope * ((n - 1) - x_mean)
+
+
+def calcular_squeeze_momentum(velas, length=20, mult=2.0,
+                              lengthKC=20, multKC=1.5):
+    """
+    Replica el Squeeze Momentum de LazyBear.
+    Devuelve dict con color, momentum, squeeze_on/off, o None si faltan velas.
+    """
+    if len(velas) < 2 * lengthKC:
+        return None
+
+    highs  = [v["high"]  for v in velas]
+    lows   = [v["low"]   for v in velas]
+    closes = [v["close"] for v in velas]
+    n = lengthKC
+
+    # ---- Bandas de Bollinger ----
+    basis = _sma(closes, length)
+    dev   = _stdev(closes, length)
+    if basis is None or dev is None:
+        return None
+    dev *= mult
+    upperBB, lowerBB = basis + dev, basis - dev
+
+    # ---- Canales de Keltner (con True Range) ----
+    ma = _sma(closes, n)
+    if ma is None:
+        return None
+    trs = []
+    for i in range(len(closes)):
+        if i == 0:
+            trs.append(highs[i] - lows[i])
+        else:
+            pc = closes[i - 1]
+            trs.append(max(highs[i] - lows[i],
+                           abs(highs[i] - pc),
+                           abs(lows[i] - pc)))
+    rangema = _sma(trs, n)
+    if rangema is None:
+        return None
+    upperKC = ma + rangema * multKC
+    lowerKC = ma - rangema * multKC
+
+    squeeze_on  = (lowerBB > lowerKC) and (upperBB < upperKC)
+    squeeze_off = (lowerBB < lowerKC) and (upperBB > upperKC)
+
+    # ---- Momentum: close - [0.25*(HH+LL) + 0.5*SMA(close)] ----
+    serie_mom = []
+    for i in range(n - 1, len(closes)):
+        hh = max(highs[i - n + 1:i + 1])
+        ll = min(lows[i - n + 1:i + 1])
+        sma_c = sum(closes[i - n + 1:i + 1]) / n
+        ref = 0.25 * (hh + ll) + 0.5 * sma_c
+        serie_mom.append(closes[i] - ref)
+
+    if len(serie_mom) < n + 1:
+        return None
+
+    m_actual = _linreg_value(serie_mom[-n:])
+    m_prev   = _linreg_value(serie_mom[-n - 1:-1])
+
+    # ---- Color (lógica exacta de LazyBear) ----
+    if m_actual > 0:
+        color = "lime" if m_actual > m_prev else "green"
+    else:
+        color = "red"  if m_actual < m_prev else "maroon"
+
+    return {
+        "squeeze_on":    squeeze_on,
+        "squeeze_off":   squeeze_off,
+        "momentum":      m_actual,
+        "momentum_prev": m_prev,
+        "color":         color,
+    }
+
+
+# ============================================================
+# ADX (Average Directional Index) — filtro de fuerza de tendencia
+# ============================================================
+
+def calcular_adx(velas, length=14):
+    """
+    Calcula ADX, +DI y -DI a partir de una lista de velas.
+    Cada vela debe tener 'high', 'low', 'close'.
+    Devuelve dict con los últimos valores o None si no hay datos suficientes.
+    """
+    n = len(velas)
+    if n < length * 2:
+        return None
+
+    highs = [v["high"] for v in velas]
+    lows = [v["low"] for v in velas]
+    closes = [v["close"] for v in velas]
+
+    # --- Calcular True Range y Directional Movements ---
+    tr_list, plus_dm_list, minus_dm_list = [], [], []
+    for i in range(1, n):
+        tr = max(highs[i] - lows[i],
+                 abs(highs[i] - closes[i-1]),
+                 abs(lows[i] - closes[i-1]))
+        tr_list.append(tr)
+
+        up_move = highs[i] - highs[i-1]
+        down_move = lows[i-1] - lows[i]
+
+        plus_dm = up_move if (up_move > down_move and up_move > 0) else 0.0
+        minus_dm = down_move if (down_move > up_move and down_move > 0) else 0.0
+
+        plus_dm_list.append(plus_dm)
+        minus_dm_list.append(minus_dm)
+
+    # --- Suavizado de Wilder (Wilder's smoothing) ---
+    def smooth(data, period):
+        smoothed = [sum(data[:period])]
+        for i in range(period, len(data)):
+            smoothed.append(smoothed[-1] - (smoothed[-1] / period) + data[i])
+        return smoothed
+
+    atr_smooth = smooth(tr_list, length)
+    plus_dm_smooth = smooth(plus_dm_list, length)
+    minus_dm_smooth = smooth(minus_dm_list, length)
+
+    # --- Calcular +DI, -DI y DX ---
+    di_plus_list, di_minus_list, dx_list = [], [], []
+    for i in range(len(atr_smooth)):
+        if atr_smooth[i] == 0:
+            continue
+        di_plus = (plus_dm_smooth[i] / atr_smooth[i]) * 100
+        di_minus = (minus_dm_smooth[i] / atr_smooth[i]) * 100
+        di_plus_list.append(di_plus)
+        di_minus_list.append(di_minus)
+
+        di_sum = di_plus + di_minus
+        if di_sum != 0:
+            dx_list.append(abs(di_plus - di_minus) / di_sum * 100)
+
+    if len(dx_list) < length:
+        return None
+
+    # --- ADX (media simple de DX) ---
+    adx = sum(dx_list[-length:]) / length
+
+    return {
+        "adx": adx,
+        "di_plus": di_plus_list[-1] if di_plus_list else None,
+        "di_minus": di_minus_list[-1] if di_minus_list else None,
+    }
+
+
+# ============================================================
+# ANÁLISIS DE PATRÓN BTC (compresión → expansión + momentum + ADX)
+# ============================================================
+
 def analizar_patron_btc(btc_cache):
     if not btc_cache:
         return {"pasa": False, "estado": "sin_datos", "detalle": "sin cache BTC"}
 
-    velas = construir_velas(btc_cache, "5m")
+    # ⚠️ CORREGIDO: usar construir_velas_de_cache (antes estaba mal escrito)
+    velas = construir_velas_de_cache(btc_cache)
     n = len(velas)
 
     if n < COMP_MIN_VELAS:
@@ -221,8 +445,28 @@ def analizar_patron_btc(btc_cache):
     ratio = r_ult / r_pre
     ahora = datetime.now(timezone.utc).timestamp()
 
+    # --- Squeeze Momentum ---
+    sqz = calcular_squeeze_momentum(velas, SQZ_BB_LENGTH, SQZ_BB_MULT,
+                                    SQZ_KC_LENGTH, SQZ_KC_MULT)
+    if sqz is None:
+        return {"pasa": False, "estado": "neutral",
+                "detalle": "faltan velas para momentum"}
+
+    mom_color = sqz["color"]
+    mom_val   = sqz["momentum"]
+
+    # --- ADX ---
+    adx_data = calcular_adx(velas, ADX_LENGTH)
+    if adx_data is None:
+        return {"pasa": False, "estado": "neutral",
+                "detalle": "faltan velas para ADX"}
+
+    adx_val = adx_data["adx"]
+    di_plus = adx_data["di_plus"]
+    di_minus = adx_data["di_minus"]
+
     # ═══════════════════════════════════════════════════════════
-    # BÚSQUEDA DE EXPANSIÓN + CONFIRMACIÓN DE TENDENCIA
+    # BÚSQUEDA DE EXPANSIÓN + CONFIRMACIÓN POR MOMENTUM Y ADX
     # ═══════════════════════════════════════════════════════════
     for k in range(max(0, n - 8), n):
         vela_actual = velas[k]["rango"]
@@ -230,45 +474,73 @@ def analizar_patron_btc(btc_cache):
         if not anteriores:
             continue
         prom_previo = _media(anteriores)
-        if prom_previo > 0 and vela_actual > prom_previo * COMP_FACTOR_EXPANSION:
-            edad_h = (ahora - velas[k]["timestamp"]) / 3600
-            if edad_h <= COMP_HORAS_RECIENTE:
-                d = "up" if velas[k]["close"] > velas[k]["open"] else "down"
+        if not (prom_previo > 0 and vela_actual > prom_previo * COMP_FACTOR_EXPANSION):
+            continue
 
-                # ═══════════════════════════════════════════════════════
-                # CONFIRMACIÓN DE TENDENCIA (últimas 3 velas de 5m)
-                # Solo reporta si las últimas velas siguen la dirección
-                # ═══════════════════════════════════════════════════════
-                ultimas_3 = velas[-3:]
-                suma_3 = sum(v["close"] - v["open"] for v in ultimas_3)
-                verdes = sum(1 for v in ultimas_3 if v["close"] > v["open"])
-                rojas = sum(1 for v in ultimas_3 if v["close"] < v["open"])
+        edad_h = (ahora - velas[k]["timestamp"]) / 3600
+        if edad_h > COMP_HORAS_RECIENTE:
+            continue
 
-                if d == "up":
-                    # Expansión UP → exigir que las últimas 3 velas sean alcistas o planas
-                    if suma_3 < 0 or rojas >= 2:
-                        print(f"   ⏭️ Expansión UP pero últimas 3 velas: "
-                              f"{verdes} verdes / {rojas} rojas (suma {suma_3:+.2f}) "
-                              f"→ ESPERANDO tendencia", flush=True)
-                        continue
-                elif d == "down":
-                    # Expansión DOWN → exigir que las últimas 3 velas sean bajistas o planas
-                    if suma_3 > 0 or verdes >= 2:
-                        print(f"   ⏭️ Expansión DOWN pero últimas 3 velas: "
-                              f"{verdes} verdes / {rojas} rojas (suma {suma_3:+.2f}) "
-                              f"→ ESPERANDO tendencia", flush=True)
-                        continue
+        d = "up" if velas[k]["close"] > velas[k]["open"] else "down"
+        etiqueta = ""
 
-                return {
-                    "pasa": True,
-                    "estado": "expandiendo",
-                    "direccion": d,
-                    "precio": velas[k]["close"],
-                    "fuerza": vela_actual / prom_previo,
-                    "edad_h": edad_h,
-                    "detalle": f"expansión {d.upper()} hace {edad_h:.1f}h "
-                               f"({vela_actual / prom_previo:.1f}x)"
-                }
+        # --- Confirmación por color de momentum ---
+        if d == "up":
+            if mom_color == "maroon":
+                etiqueta = "TEMPRANA"
+            elif mom_color == "lime":
+                etiqueta = "CONFIRMADA"
+            else:
+                print(f"   ⏭️ Expansión UP pero momentum {mom_color.upper()} "
+                      f"({mom_val:+.4f}) → ESPERANDO", flush=True)
+                continue
+        else:  # down
+            if mom_color == "green":
+                etiqueta = "TEMPRANA"
+            elif mom_color == "red":
+                etiqueta = "CONFIRMADA"
+            else:
+                print(f"   ⏭️ Expansión DOWN pero momentum {mom_color.upper()} "
+                      f"({mom_val:+.4f}) → ESPERANDO", flush=True)
+                continue
+
+        # --- Filtro ADX: fuerza de tendencia ---
+        if adx_val < ADX_UMBRAL:
+            print(f"   ⏭️ Expansión {d.upper()} pero ADX {adx_val:.1f} < {ADX_UMBRAL} → "
+                  f"mercado sin fuerza, ESPERANDO", flush=True)
+            continue
+
+        # --- Dirección del ADX: debe estar alineada ---
+        if d == "up" and (di_plus is None or di_minus is None or di_plus <= di_minus):
+            print(f"   ⏭️ Expansión UP pero DI+ {di_plus} <= DI- {di_minus} → "
+                  f"dirección no confirmada", flush=True)
+            continue
+        if d == "down" and (di_plus is None or di_minus is None or di_minus <= di_plus):
+            print(f"   ⏭️ Expansión DOWN pero DI- {di_minus} <= DI+ {di_plus} → "
+                  f"dirección no confirmada", flush=True)
+            continue
+
+        # --- Si pasa todos los filtros, devuelve la alerta ---
+        return {
+            "pasa": True,
+            "estado": "expandiendo",
+            "direccion": d,
+            "precio": velas[k]["close"],
+            "fuerza": vela_actual / prom_previo,
+            "edad_h": edad_h,
+            "momentum":        mom_val,
+            "momentum_prev":   sqz["momentum_prev"],
+            "momentum_color":  mom_color,
+            "momentum_etiqueta": etiqueta,
+            "squeeze_on":      sqz["squeeze_on"],
+            "adx": adx_val,
+            "di_plus": di_plus,
+            "di_minus": di_minus,
+            "detalle": (f"expansión {d.upper()} hace {edad_h:.1f}h "
+                        f"({vela_actual/prom_previo:.1f}x) | "
+                        f"mom {mom_color.upper()} [{etiqueta}] {mom_val:+.4f} | "
+                        f"ADX {adx_val:.1f}")
+        }
 
     if ratio < COMP_RATIO_COMPRESION:
         return {"pasa": True, "estado": "comprimiendo",
@@ -276,6 +548,11 @@ def analizar_patron_btc(btc_cache):
 
     return {"pasa": False, "estado": "neutral",
             "detalle": f"rango normal ({ratio:.2f}x)"}
+
+
+# ============================================================
+# THROTTLE
+# ============================================================
 
 def cargar_throttle():
     try:
@@ -1122,6 +1399,18 @@ def procesar_alertas(alerts, filtered_previous, btc_context, pd_index):
         flecha_pat = "🔥" if pat_estado == "EXPANDIENDO" else "🌀" if pat_estado == "COMPRIMIENDO" else "⚪"
         patron_linea = f"{flecha_pat} Patrón: {pat_estado} — {pat_det}"
 
+        # --- Línea de momentum (si existe) ---
+        mom_line = ""
+        if pat.get("momentum") is not None:
+            mom_color = (pat.get("momentum_color") or "?").upper()
+            mom_val = pat.get("momentum")
+            mom_etq = pat.get("momentum_etiqueta", "")
+            badge = "🟡 TEMPRANA" if mom_etq == "TEMPRANA" else "🟢 CONFIRMADA"
+            mom_line = f"📈 Momentum: {mom_color} {mom_val:+.4f} {badge}\n"
+        if pat.get("adx") is not None:
+            adx_val = pat.get("adx")
+            mom_line += f"📊 ADX: {adx_val:.1f} (umbral {ADX_UMBRAL})\n"
+
         msg = (
             f"🧠 MULTI TF\n"
             f"{emoji} {operacion} {symbol}\n"
@@ -1131,7 +1420,8 @@ def procesar_alertas(alerts, filtered_previous, btc_context, pd_index):
             f"   • Nivel: ${nivel_linea:.6f}\n"
             f"   • Toques: {line.get('touchCount', 0)} ({alert['structure_quality']})\n"
             f"🎯 Score: {alert['score']:.1f}\n"
-            f"📈 Momentum: {flecha} {tendencia}\n"
+            f"📈 Tendencia: {flecha} {tendencia}\n"
+            f"{mom_line}"
             f"📊 BTC: {btc_dir_str} {btc_modo_str} (RSI4H {btc_rsi4h_str} | Δ{delta_2h_txt})\n"
             f"{pd_linea}\n"
             f"{patron_linea}\n"
@@ -1183,7 +1473,7 @@ def analizar_moneda(symbol, volume_by_symbol, btc_context, btc_rsi_data, hora_li
 
 def main():
     print("\n" + "=" * 70, flush=True)
-    print("🚀 MULTI TF COINBEACON B — FIX 9 + PD + FILTRO COMPRESIÓN", flush=True)
+    print("🚀 MULTI TF COINBEACON B — FIX 10 + MOMENTUM + ADX", flush=True)
     print("=" * 70, flush=True)
     print(f"\nHora UTC: {datetime.now(timezone.utc).isoformat()}", flush=True)
 
@@ -1237,18 +1527,31 @@ def main():
             fuerza = patron_btc.get("fuerza", 0)
             edad_h = patron_btc.get("edad_h", 0)
 
+            mom_color = (patron_btc.get("momentum_color") or "?").upper()
+            mom_val = patron_btc.get("momentum")
+            mom_etq = patron_btc.get("momentum_etiqueta", "")
+            mom_val_txt = f"{mom_val:+.4f}" if mom_val is not None else "N/A"
+            sqz_txt = "🔵 SQUEEZE ON" if patron_btc.get("squeeze_on") else "⚪ SQUEEZE OFF"
+            badge = "🟡 TEMPRANA" if mom_etq == "TEMPRANA" else "🟢 CONFIRMADA"
+
+            adx_val = patron_btc.get("adx")
+            adx_txt = f"ADX {adx_val:.1f}" if adx_val is not None else "ADX N/A"
+            adx_ok = "✅" if adx_val and adx_val >= ADX_UMBRAL else "⚠️"
+
             send_telegram_message(
                 f"🧠 MULTI TF\n"
                 f"🔥 EXPANSIÓN {direccion.upper()} — {emoji_op} {operacion} BTC\n"
                 f"━━━━━━━━━━━━━━━━━━━\n"
                 f"📍 Precio: ${precio_actual:,.2f}\n"
                 f"📊 Fuerza: {fuerza:.1f}x hace {edad_h:.1f}h\n"
+                f"📈 Momentum: {mom_color} {mom_val_txt} {badge}\n"
+                f"{sqz_txt}\n"
+                f"📊 ADX: {adx_ok} {adx_txt} (umbral {ADX_UMBRAL})\n"
                 f"🎯 Dirección: {operacion}\n"
                 f"✅ Filtro pasa → analizando monedas...\n"
                 f"🕐 {ahora_lima_str} (Lima)"
             )
         else:
-            # NEUTRAL o SIN_DATOS — no enviamos
             print(f"   ⏸️ Estado {estado_actual} — throttle guardado, sin envío", flush=True)
     else:
         print("   🔇 Throttle activo — sin envío", flush=True)
