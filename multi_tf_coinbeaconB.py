@@ -13,7 +13,7 @@ from pathlib import Path
 import requests
 
 # ============================================================
-# MULTI TF COINBEACON B — FIX 11 + DIAGNÓSTICO DE FILTROS
+# MULTI TF COINBEACON B — FIX 12 + ATR PERCENTIL + NR7
 # ============================================================
 
 SYMBOLS = [
@@ -64,12 +64,20 @@ HORA_FIN = 24
 # ============================================================
 COMP_VENTANA          = 4
 COMP_MIN_VELAS        = 12
-COMP_RATIO_COMPRESION = 0.70
+COMP_RATIO_COMPRESION = 0.70      # legacy (ya no se usa para compresión)
 COMP_FACTOR_EXPANSION = 3.0
 COMP_HORAS_RECIENTE   = 2
 COMP_MODO_FILTRO      = "hard"
 
 COMP_THROTTLE_MIN     = 30
+
+# ============================================================
+# NUEVA COMPRESIÓN — ATR PERCENTIL + NR7
+# ============================================================
+ATR_PERIOD            = 14
+ATR_VENTANA           = 100     # últimas 100 muestras de ATR
+ATR_UMBRAL_COMPRESION = 20.0    # < 20 = compresión
+NR7_PERIOD            = 7       # NR7 (patrón Toby Crabel)
 
 # ============================================================
 # CONFIGURACIÓN SQUEEZE MOMENTUM (LazyBear)
@@ -86,7 +94,7 @@ ADX_LENGTH = 14
 ADX_UMBRAL = 23.0
 
 # ============================================================
-# CONTADOR DE DIAGNÓSTICO EN MEMORIA (para el resumen del run)
+# CONTADOR DE DIAGNÓSTICO
 # ============================================================
 CONTADOR_FILTROS = {
     "EDAD": 0,
@@ -94,6 +102,7 @@ CONTADOR_FILTROS = {
     "ADX": 0,
     "DI": 0,
     "PASA": 0,
+    "COMPRESION": 0,
     "SIN_EXPANSION": 0,
 }
 
@@ -164,6 +173,7 @@ def leer_cache_remoto(symbol):
         "dir15": ultimo.get("dir15"),
         "dir1h": ultimo.get("dir1h"),
         "dir4h": ultimo.get("dir4h"),
+        "atr_pct15": ultimo.get("atr_pct15"),
         "edad_min": edad_min,
         "n_muestras": len(pulso),
         "pulso": pulso,
@@ -206,14 +216,10 @@ def traducir_color_momentum(color_interno):
 
 
 # ============================================================
-# DIAGNÓSTICO — Registro de cada evaluación del filtro BTC
+# DIAGNÓSTICO
 # ============================================================
 
 def registrar_diagnostico(fila):
-    """
-    Guarda en CSV cada evaluación del filtro de expansión BTC.
-    Sirve para saber QUÉ filtro detuvo cada señal.
-    """
     fieldnames = [
         "ts_lima", "direccion", "edad_h", "fuerza_x",
         "mom_nombre", "mom_valor", "mom_etiqueta",
@@ -231,7 +237,7 @@ def registrar_diagnostico(fila):
 
 
 # ============================================================
-# CONSTRUCCIÓN DE VELAS (con high/low/volumen)
+# CONSTRUCCIÓN DE VELAS
 # ============================================================
 
 def construir_velas_de_cache(cache):
@@ -288,7 +294,58 @@ def construir_velas_de_cache(cache):
 
 
 # ============================================================
-# SQUEEZE MOMENTUM (LazyBear) — Python puro
+# ATR PERCENTIL — Detección de compresión adaptativa
+# ============================================================
+
+def calcular_atr_percentile(velas, period=14, ventana=100):
+    """
+    Percentil del ATR actual respecto a los últimos `ventana` ATRs.
+    0 = ATR más bajo del histórico (compresión máxima)
+    100 = ATR más alto del histórico (expansión máxima)
+    """
+    if len(velas) < period + ventana + 1:
+        return None
+
+    # --- Paso 1: True Ranges ---
+    trs = []
+    for i in range(1, len(velas)):
+        high = velas[i]["high"]
+        low  = velas[i]["low"]
+        pc   = velas[i-1]["close"]
+        tr = max(high - low, abs(high - pc), abs(low - pc))
+        trs.append(tr)
+
+    if len(trs) < period + ventana:
+        return None
+
+    # --- Paso 2: ATRs con suma móvil O(n) ---
+    atrs = []
+    suma = sum(trs[:period])
+    atrs.append(suma / period)
+    for i in range(period, len(trs)):
+        suma = suma - trs[i - period] + trs[i]
+        atrs.append(suma / period)
+
+    if len(atrs) < ventana:
+        return None
+
+    # --- Paso 3: Percentil ---
+    actual = atrs[-1]
+    historico = atrs[-ventana:]
+    menores = sum(1 for x in historico if x <= actual)
+    return round((menores / len(historico)) * 100, 2)
+
+
+def es_nr7(velas, period=7):
+    """NR7: la vela actual tiene el rango más estrecho de las últimas 7 velas."""
+    if len(velas) < period:
+        return False
+    rangos = [v["rango"] for v in velas[-period:]]
+    return rangos[-1] == min(rangos)
+
+
+# ============================================================
+# SQUEEZE MOMENTUM (LazyBear)
 # ============================================================
 
 def _sma(serie, length):
@@ -386,7 +443,7 @@ def calcular_squeeze_momentum(velas, length=20, mult=2.0,
 
 
 # ============================================================
-# ADX (Average Directional Index)
+# ADX
 # ============================================================
 
 def calcular_adx(velas, length=14):
@@ -450,7 +507,7 @@ def calcular_adx(velas, length=14):
 
 
 # ============================================================
-# ANÁLISIS DE PATRÓN BTC (con diagnóstico por filtro)
+# ANÁLISIS DE PATRÓN BTC
 # ============================================================
 
 def analizar_patron_btc(btc_cache):
@@ -467,18 +524,14 @@ def analizar_patron_btc(btc_cache):
         CONTADOR_FILTROS["SIN_EXPANSION"] += 1
         return {"pasa": False, "estado": "sin_datos", "detalle": f"solo {n} velas"}
 
-    v = COMP_VENTANA
-    r_ult = _media([x["rango"] for x in velas[-v:]])
-    r_pre = _media([x["rango"] for x in velas[-2*v:-v]])
-
-    if r_pre <= 0:
-        CONTADOR_FILTROS["SIN_EXPANSION"] += 1
-        return {"pasa": False, "estado": "neutral", "detalle": "sin rango previo"}
-
-    ratio = r_ult / r_pre
     ahora = datetime.now(timezone.utc).timestamp()
     ts_lima = (datetime.now(timezone.utc) + LIMA_OFFSET).strftime("%Y-%m-%d %H:%M")
 
+    # --- Nuevas métricas de compresión ---
+    atr_pct = calcular_atr_percentile(velas, ATR_PERIOD, ATR_VENTANA)
+    nr7 = es_nr7(velas, NR7_PERIOD)
+
+    # --- Squeeze Momentum ---
     sqz = calcular_squeeze_momentum(velas, SQZ_BB_LENGTH, SQZ_BB_MULT,
                                     SQZ_KC_LENGTH, SQZ_KC_MULT)
     if sqz is None:
@@ -490,6 +543,7 @@ def analizar_patron_btc(btc_cache):
     mom_val   = sqz["momentum"]
     mom_nombre, mom_emoji, _ = traducir_color_momentum(mom_color)
 
+    # --- ADX ---
     adx_data = calcular_adx(velas, ADX_LENGTH)
     if adx_data is None:
         CONTADOR_FILTROS["SIN_EXPANSION"] += 1
@@ -501,7 +555,7 @@ def analizar_patron_btc(btc_cache):
     di_minus = adx_data["di_minus"]
 
     # ═══════════════════════════════════════════════════════════
-    # BÚSQUEDA DE EXPANSIÓN CON DIAGNÓSTICO POR FILTRO
+    # BÚSQUEDA DE EXPANSIÓN
     # ═══════════════════════════════════════════════════════════
     hay_expansion = False
 
@@ -519,7 +573,6 @@ def analizar_patron_btc(btc_cache):
         edad_h = (ahora - velas[k]["timestamp"]) / 3600
         d = "up" if velas[k]["close"] > velas[k]["open"] else "down"
 
-        # Base del registro de diagnóstico
         base_diag = {
             "ts_lima": ts_lima,
             "direccion": d.upper(),
@@ -533,7 +586,7 @@ def analizar_patron_btc(btc_cache):
             "di_minus": f"{di_minus:.2f}" if di_minus is not None else "N/A",
         }
 
-        # ---- FILTRO: EDAD ----
+        # Filtro EDAD
         if edad_h > COMP_HORAS_RECIENTE:
             base_diag["resultado"] = "RECHAZA"
             base_diag["razon"] = f"EDAD ({edad_h:.1f}h > {COMP_HORAS_RECIENTE}h)"
@@ -545,7 +598,7 @@ def analizar_patron_btc(btc_cache):
 
         etiqueta = ""
 
-        # ---- FILTRO: MOMENTUM ----
+        # Filtro MOMENTUM
         if d == "up":
             if mom_color == "maroon":
                 etiqueta = "TEMPRANO"
@@ -575,7 +628,7 @@ def analizar_patron_btc(btc_cache):
 
         base_diag["mom_etiqueta"] = etiqueta
 
-        # ---- FILTRO: ADX ----
+        # Filtro ADX
         if adx_val < ADX_UMBRAL:
             base_diag["resultado"] = "RECHAZA"
             base_diag["razon"] = f"ADX ({adx_val:.1f} < {ADX_UMBRAL})"
@@ -585,32 +638,31 @@ def analizar_patron_btc(btc_cache):
                   f"({adx_val:.1f} < {ADX_UMBRAL})", flush=True)
             continue
 
-        # ---- FILTRO: DI+ / DI- ----
+        # Filtro DI
         if d == "up" and (di_plus is None or di_minus is None or di_plus <= di_minus):
             base_diag["resultado"] = "RECHAZA"
             base_diag["razon"] = f"DI ({di_plus} <= {di_minus})"
             registrar_diagnostico(base_diag)
             CONTADOR_FILTROS["DI"] += 1
-            print(f"   ⏭️ Expansión UP rechazada por DI "
-                  f"({di_plus} <= {di_minus})", flush=True)
+            print(f"   ⏭️ Expansión UP rechazada por DI", flush=True)
             continue
         if d == "down" and (di_plus is None or di_minus is None or di_minus <= di_plus):
             base_diag["resultado"] = "RECHAZA"
             base_diag["razon"] = f"DI ({di_minus} <= {di_plus})"
             registrar_diagnostico(base_diag)
             CONTADOR_FILTROS["DI"] += 1
-            print(f"   ⏭️ Expansión DOWN rechazada por DI "
-                  f"({di_minus} <= {di_plus})", flush=True)
+            print(f"   ⏭️ Expansión DOWN rechazada por DI", flush=True)
             continue
 
-        # ---- PASA TODOS LOS FILTROS ----
+        # PASA
         base_diag["resultado"] = "PASA"
         base_diag["razon"] = f"OK [{etiqueta}]"
         registrar_diagnostico(base_diag)
         CONTADOR_FILTROS["PASA"] += 1
 
         print(f"   ✅ EXPANSIÓN {d.upper()} CONFIRMADA — "
-              f"{mom_nombre} [{etiqueta}] | ADX {adx_val:.1f}", flush=True)
+              f"{mom_nombre} [{etiqueta}] | ADX {adx_val:.1f} | "
+              f"ATR% {atr_pct if atr_pct is not None else 'N/A'}", flush=True)
 
         return {
             "pasa": True,
@@ -629,22 +681,38 @@ def analizar_patron_btc(btc_cache):
             "adx": adx_val,
             "di_plus": di_plus,
             "di_minus": di_minus,
+            "atr_pct": atr_pct,
+            "nr7": nr7,
             "detalle": (f"expansión {d.upper()} hace {edad_h:.1f}h "
                         f"({fuerza_x:.1f}x) | "
                         f"mom {mom_nombre} [{etiqueta}] {mom_val:+.4f} | "
-                        f"ADX {adx_val:.1f}")
+                        f"ADX {adx_val:.1f} | "
+                        f"ATR% {atr_pct if atr_pct is not None else 'N/A'}")
         }
 
-    # Si no hubo expansión válida
+    # ═══════════════════════════════════════════════════════════
+    # SIN EXPANSIÓN — EVALUAR COMPRESIÓN POR ATR PERCENTIL
+    # ═══════════════════════════════════════════════════════════
+
     if not hay_expansion:
         CONTADOR_FILTROS["SIN_EXPANSION"] += 1
 
-    if ratio < COMP_RATIO_COMPRESION:
-        return {"pasa": True, "estado": "comprimiendo",
-                "detalle": f"comprimiendo {ratio:.2f}x"}
+    # Compresión: ATR percentil bajo
+    if atr_pct is not None and atr_pct < ATR_UMBRAL_COMPRESION:
+        CONTADOR_FILTROS["COMPRESION"] += 1
+        nr7_txt = " | NR7 ✅" if nr7 else ""
+        detalle = f"compresión ATR%={atr_pct:.1f} (<{ATR_UMBRAL_COMPRESION}){nr7_txt}"
+        print(f"   🌀 COMPRESIÓN detectada — {detalle}", flush=True)
+        return {
+            "pasa": False,                          # ← NO autoriza operar
+            "estado": "comprimiendo",
+            "atr_pct": atr_pct,
+            "nr7": nr7,
+            "detalle": detalle,
+        }
 
     return {"pasa": False, "estado": "neutral",
-            "detalle": f"rango normal ({ratio:.2f}x)"}
+            "detalle": f"rango normal (ATR% {atr_pct if atr_pct is not None else 'N/A'})"}
 
 
 # ============================================================
@@ -1588,7 +1656,7 @@ def analizar_moneda(symbol, volume_by_symbol, btc_context, btc_rsi_data, hora_li
 
 
 # ============================================================
-# RESUMEN DE DIAGNÓSTICO AL FINAL DEL RUN
+# RESUMEN DIAGNÓSTICO
 # ============================================================
 
 def imprimir_resumen_diagnostico():
@@ -1601,9 +1669,7 @@ def imprimir_resumen_diagnostico():
         print("   (Sin evaluaciones registradas en este ciclo)", flush=True)
         return
 
-    # Ordenar por cantidad descendente
     orden = sorted(CONTADOR_FILTROS.items(), key=lambda x: -x[1])
-
     for nombre, count in orden:
         if count == 0:
             continue
@@ -1614,17 +1680,16 @@ def imprimir_resumen_diagnostico():
     print("-" * 70, flush=True)
     print(f"   TOTAL evaluaciones: {total}", flush=True)
 
-    # Sugerencia automática
     print("\n   💡 Sugerencia automática:", flush=True)
     if CONTADOR_FILTROS["MOMENTUM"] > total * 0.5:
-        print("      ⚠️ MOMENTUM rechaza >50% → considerar aceptar 'green'/'maroon' como dudoso", flush=True)
+        print("      ⚠️ MOMENTUM rechaza >50% → considerar aceptar 'green'/'maroon'", flush=True)
     if CONTADOR_FILTROS["ADX"] > total * 0.4:
         print("      ⚠️ ADX rechaza >40% → considerar bajar umbral a 20", flush=True)
     if CONTADOR_FILTROS["EDAD"] > total * 0.3:
         print("      ⚠️ EDAD rechaza >30% → considerar subir COMP_HORAS_RECIENTE a 3-4h", flush=True)
     if CONTADOR_FILTROS["PASA"] == 0 and total > 5:
-        print("      ⚠️ 0 señales pasaron → sistema sobre-filtrado, relajar algún umbral", flush=True)
-    if CONTADOR_FILTROS["PASA"] > 0 and CONTADOR_FILTROS["PASA"] <= 3:
+        print("      ⚠️ 0 señales pasaron → sistema sobre-filtrado", flush=True)
+    if 0 < CONTADOR_FILTROS["PASA"] <= 3:
         print("      ✅ Balance saludable — pocas señales pero pasan las buenas", flush=True)
 
 
@@ -1633,7 +1698,7 @@ def main():
     CONTADOR_FILTROS = {k: 0 for k in CONTADOR_FILTROS}
 
     print("\n" + "=" * 70, flush=True)
-    print("🚀 MULTI TF COINBEACON B — FIX 11 + DIAGNÓSTICO DE FILTROS", flush=True)
+    print("🚀 MULTI TF COINBEACON B — FIX 12 + ATR PERCENTIL + NR7", flush=True)
     print("=" * 70, flush=True)
     print(f"\nHora UTC: {datetime.now(timezone.utc).isoformat()}", flush=True)
 
@@ -1671,11 +1736,15 @@ def main():
         ahora_lima_str = (datetime.now(timezone.utc) + LIMA_OFFSET).strftime("%Y-%m-%d %H:%M")
 
         if estado_actual == "comprimiendo":
+            atr_pct_txt = patron_btc.get("atr_pct")
+            nr7_val = patron_btc.get("nr7", False)
+            atr_str = f"ATR%: {atr_pct_txt:.1f}" if atr_pct_txt is not None else "ATR%: N/A"
+            nr7_str = " | NR7 ✅" if nr7_val else ""
             send_telegram_message(
                 f"🧠 MULTI TF\n"
                 f"🌀 COMPRESIÓN BTC DETECTADA\n"
                 f"━━━━━━━━━━━━━━━━━━━\n"
-                f"   {patron_btc['detalle']}\n"
+                f"   {atr_str}{nr7_str}\n"
                 f"⏳ Esperando ruptura (UP o DOWN)\n"
                 f"🕐 {ahora_lima_str} (Lima)"
             )
@@ -1710,6 +1779,9 @@ def main():
             adx_txt = f"{adx_val:.1f}" if adx_val is not None else "N/A"
             adx_emoji = "✅" if adx_val and adx_val >= ADX_UMBRAL else "⚠️"
 
+            atr_pct_txt = patron_btc.get("atr_pct")
+            atr_line = f"📊 ATR%: {atr_pct_txt:.1f}\n" if atr_pct_txt is not None else ""
+
             send_telegram_message(
                 f"🧠 MULTI TF\n"
                 f"🔥 EXPANSIÓN {direccion.upper()} — {emoji_op} {operacion} BTC\n"
@@ -1720,6 +1792,7 @@ def main():
                 f"   ({mom_signif})\n"
                 f"{sqz_txt}\n"
                 f"📊 ADX: {adx_emoji} {adx_txt} (umbral {ADX_UMBRAL})\n"
+                f"{atr_line}"
                 f"🎯 Dirección: {operacion}\n"
                 f"✅ Filtro pasa → analizando monedas...\n"
                 f"🕐 {ahora_lima_str} (Lima)"
