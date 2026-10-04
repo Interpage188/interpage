@@ -42,7 +42,7 @@ RSI_RECUP_BAJO   = 40
 RSI_RECUP_ALTO   = 60
 
 RETENCION_PULSO_H = 168
-OKX_LIMIT_VELAS = 200      # ← CAMBIO: era 100, ahora 200
+OKX_LIMIT_VELAS = 200      # era 100, ahora 200 (para ATR percentil)
 
 DATA_DIR = Path("data")
 DATA_DIR.mkdir(exist_ok=True)
@@ -119,7 +119,7 @@ def calcular_rsi(prices, period=14):
 
 
 # ============================================================
-# NUEVO: ATR percentil (detección de compresión adaptativa)
+# ATR PERCENTIL — Detección de compresión adaptativa
 # ============================================================
 
 def calcular_atr_percentile(velas, period=14, ventana=100):
@@ -159,8 +159,6 @@ def calcular_atr_percentile(velas, period=14, ventana=100):
     # --- Paso 3: Percentil ---
     actual = atrs[-1]
     historico = atrs[-ventana:]
-    menores = sum(1 for x in atrs_hist if x <= actual for atrs_hist in [historico])
-    # (equivalente a: menores = sum(1 for x in historico if x <= actual))
     menores = sum(1 for x in historico if x <= actual)
 
     return round((menores / len(historico)) * 100, 2)
@@ -214,7 +212,7 @@ def actualizar_pulso(symbol, ahora):
     rsi1h = calcular_rsi([v["c"] for v in velas_1h]) if velas_1h else None
     rsi4h = calcular_rsi([v["c"] for v in velas_4h]) if velas_4h else None
 
-    # ✅ NUEVO: ATR percentil en 15m
+    # NUEVO: ATR percentil en 15m
     atr_pct15 = calcular_atr_percentile(velas_15m, period=14, ventana=100)
 
     price = velas_15m[-1]["c"]
@@ -249,7 +247,7 @@ def actualizar_pulso(symbol, ahora):
         "vol15":      round(vol_contratos, 4) if vol_contratos is not None else None,
         "vol_usdt15": round(vol_usdt, 2) if vol_usdt is not None else None,
         "rvol15":     round(rvol, 2),
-        "atr_pct15":  atr_pct15,                                    # ✅ NUEVO
+        "atr_pct15":  atr_pct15,
         "dir4h":      direccion(velas_4h) if velas_4h else "?",
         "rsi15":      round(rsi15, 2) if rsi15 is not None else None,
         "rsi1h":      round(rsi1h, 2) if rsi1h is not None else None,
@@ -301,7 +299,7 @@ def actualizar_pulso(symbol, ahora):
     rsi15_str = f"{rsi15:.1f}" if rsi15 is not None else "N/A"
     rsi1h_str = f"{rsi1h:.1f}" if rsi1h is not None else "N/A"
     rsi4h_str = f"{rsi4h:.1f}" if rsi4h is not None else "N/A"
-    atr_pct_str = f"{atr_pct15:.1f}" if atr_pct15 is not None else "N/A"    # ✅ NUEVO
+    atr_pct_str = f"{atr_pct15:.1f}" if atr_pct15 is not None else "N/A"
 
     icono_zona = {
         "extremo": "🔴",
@@ -310,24 +308,21 @@ def actualizar_pulso(symbol, ahora):
         "desconocida": "⚪",
     }.get(zona, "⚪")
 
-    # ✅ NUEVO: icono de compresión según ATR%
+    # Icono de compresión según ATR%
     if atr_pct15 is not None and atr_pct15 < 20:
-        icono_atr = "🌀"   # compresión
+        icono_atr = "🌀"
     elif atr_pct15 is not None and atr_pct15 > 80:
-        icono_atr = "🔥"   # expansión
+        icono_atr = "🔥"
     else:
         icono_atr = "  "
 
-    if symbol == "BTC":
-        velas_info = f"velas5m={len(cache['velas_5m'])}"
-    else:
-        velas_info = f"velas5m={len(cache['velas_5m'])}"
+    velas_info = f"velas5m={len(cache['velas_5m'])}"
 
     print(
         f"   {icono_zona} {symbol} [{zona}]: ${price:.6f} | "
         f"RSI15={rsi15_str} {sample['dir15']} | "
         f"RSI1h={rsi1h_str} | RSI4h={rsi4h_str} | "
-        f"ATR%={icono_atr}{atr_pct_str} | "                     # ✅ NUEVO
+        f"ATR%={icono_atr}{atr_pct_str} | "
         f"RVOL={sample['rvol15']:.2f} | "
         f"pulso={len(pulso)} | {velas_info}",
         flush=True
