@@ -8,11 +8,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 # ============================================================
-# RECOLECTOR — Fase 1.8
+# RECOLECTOR — Fase 1.9
 #   17 monedas
 #   Frecuencia: cada 5 min
 #   Fuente: OKX (velas OHLC reales)
 #   Retención: 168h (7 días) pulso + velas_5m acumuladas (solo BTC)
+#   NUEVO: ATR percentil 15m
 # ============================================================
 
 SYMBOLS = [
@@ -41,7 +42,7 @@ RSI_RECUP_BAJO   = 40
 RSI_RECUP_ALTO   = 60
 
 RETENCION_PULSO_H = 168
-OKX_LIMIT_VELAS = 100
+OKX_LIMIT_VELAS = 200      # ← CAMBIO: era 100, ahora 200
 
 DATA_DIR = Path("data")
 DATA_DIR.mkdir(exist_ok=True)
@@ -117,6 +118,54 @@ def calcular_rsi(prices, period=14):
     return 100 - (100 / (1 + rs))
 
 
+# ============================================================
+# NUEVO: ATR percentil (detección de compresión adaptativa)
+# ============================================================
+
+def calcular_atr_percentile(velas, period=14, ventana=100):
+    """
+    Percentil del ATR actual respecto a los últimos `ventana` ATRs.
+    Convierte el ATR a un valor 0-100:
+      0   = ATR más bajo del histórico reciente (compresión máxima)
+      100 = ATR más alto del histórico reciente (expansión máxima)
+    Devuelve None si no hay suficientes velas.
+    """
+    if len(velas) < period + ventana + 1:
+        return None
+
+    # --- Paso 1: True Ranges ---
+    trs = []
+    for i in range(1, len(velas)):
+        high = velas[i]["h"]
+        low  = velas[i]["l"]
+        pc   = velas[i-1]["c"]
+        tr = max(high - low, abs(high - pc), abs(low - pc))
+        trs.append(tr)
+
+    if len(trs) < period + ventana:
+        return None
+
+    # --- Paso 2: ATRs con suma móvil O(n) ---
+    atrs = []
+    suma = sum(trs[:period])
+    atrs.append(suma / period)
+    for i in range(period, len(trs)):
+        suma = suma - trs[i - period] + trs[i]
+        atrs.append(suma / period)
+
+    if len(atrs) < ventana:
+        return None
+
+    # --- Paso 3: Percentil ---
+    actual = atrs[-1]
+    historico = atrs[-ventana:]
+    menores = sum(1 for x in atrs_hist if x <= actual for atrs_hist in [historico])
+    # (equivalente a: menores = sum(1 for x in historico if x <= actual))
+    menores = sum(1 for x in historico if x <= actual)
+
+    return round((menores / len(historico)) * 100, 2)
+
+
 def zona_rsi(rsi15):
     if rsi15 is None:
         return "desconocida"
@@ -165,6 +214,9 @@ def actualizar_pulso(symbol, ahora):
     rsi1h = calcular_rsi([v["c"] for v in velas_1h]) if velas_1h else None
     rsi4h = calcular_rsi([v["c"] for v in velas_4h]) if velas_4h else None
 
+    # ✅ NUEVO: ATR percentil en 15m
+    atr_pct15 = calcular_atr_percentile(velas_15m, period=14, ventana=100)
+
     price = velas_15m[-1]["c"]
 
     def direccion(velas):
@@ -197,6 +249,7 @@ def actualizar_pulso(symbol, ahora):
         "vol15":      round(vol_contratos, 4) if vol_contratos is not None else None,
         "vol_usdt15": round(vol_usdt, 2) if vol_usdt is not None else None,
         "rvol15":     round(rvol, 2),
+        "atr_pct15":  atr_pct15,                                    # ✅ NUEVO
         "dir4h":      direccion(velas_4h) if velas_4h else "?",
         "rsi15":      round(rsi15, 2) if rsi15 is not None else None,
         "rsi1h":      round(rsi1h, 2) if rsi1h is not None else None,
@@ -222,12 +275,8 @@ def actualizar_pulso(symbol, ahora):
 
     # ═══════════════════════════════════════════════════════════
     # ACUMULAR VELAS — SOLO BTC acumula históricamente.
-    # El resto solo guarda las últimas 100 de cada TF (sobreescribe).
-    # Razón: el filtro compresión→expansión del multi_tf_coinbeacon
-    # solo analiza BTC. Las velas de las otras monedas no se usan.
     # ═══════════════════════════════════════════════════════════
     if symbol == "BTC":
-        # Acumular velas_5m con dedup por ts
         velas_previas = cache.get("velas_5m", [])
         ts_vistos = {v["ts"] for v in velas_previas}
         for v in velas_5m:
@@ -237,12 +286,10 @@ def actualizar_pulso(symbol, ahora):
         limite_velas = int((ahora.timestamp() - RETENCION_PULSO_H * 3600) * 1000)
         cache["velas_5m"] = [v for v in velas_previas if v["ts"] >= limite_velas]
 
-        # Las siguientes se acumulan también (para multi-timeframe futuro)
         cache["velas_15m"] = velas_15m
         cache["velas_1h"]  = velas_1h
         cache["velas_4h"]  = velas_4h
     else:
-        # Otras monedas: solo las últimas 100 (no acumula)
         cache["velas_5m"]  = velas_5m
         cache["velas_15m"] = velas_15m
         cache["velas_1h"]  = velas_1h
@@ -254,6 +301,7 @@ def actualizar_pulso(symbol, ahora):
     rsi15_str = f"{rsi15:.1f}" if rsi15 is not None else "N/A"
     rsi1h_str = f"{rsi1h:.1f}" if rsi1h is not None else "N/A"
     rsi4h_str = f"{rsi4h:.1f}" if rsi4h is not None else "N/A"
+    atr_pct_str = f"{atr_pct15:.1f}" if atr_pct15 is not None else "N/A"    # ✅ NUEVO
 
     icono_zona = {
         "extremo": "🔴",
@@ -261,6 +309,14 @@ def actualizar_pulso(symbol, ahora):
         "normal": "🟢",
         "desconocida": "⚪",
     }.get(zona, "⚪")
+
+    # ✅ NUEVO: icono de compresión según ATR%
+    if atr_pct15 is not None and atr_pct15 < 20:
+        icono_atr = "🌀"   # compresión
+    elif atr_pct15 is not None and atr_pct15 > 80:
+        icono_atr = "🔥"   # expansión
+    else:
+        icono_atr = "  "
 
     if symbol == "BTC":
         velas_info = f"velas5m={len(cache['velas_5m'])}"
@@ -271,6 +327,7 @@ def actualizar_pulso(symbol, ahora):
         f"   {icono_zona} {symbol} [{zona}]: ${price:.6f} | "
         f"RSI15={rsi15_str} {sample['dir15']} | "
         f"RSI1h={rsi1h_str} | RSI4h={rsi4h_str} | "
+        f"ATR%={icono_atr}{atr_pct_str} | "                     # ✅ NUEVO
         f"RVOL={sample['rvol15']:.2f} | "
         f"pulso={len(pulso)} | {velas_info}",
         flush=True
@@ -282,7 +339,7 @@ def main():
     ahora = datetime.now(timezone.utc)
 
     print("\n" + "=" * 70, flush=True)
-    print("📦 RECOLECTOR — Fase 1.8 (acumula velas_5m solo para BTC)", flush=True)
+    print("📦 RECOLECTOR — Fase 1.9 (ATR percentil 15m)", flush=True)
     print(f"   {len(SYMBOLS)} monedas | cada 5 min", flush=True)
     print(f"   Retención: {RETENCION_PULSO_H}h", flush=True)
     print("=" * 70, flush=True)
