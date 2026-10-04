@@ -13,7 +13,7 @@ from pathlib import Path
 import requests
 
 # ============================================================
-# MULTI TF COINBEACON B — FIX 10 + MOMENTUM + ADX
+# MULTI TF COINBEACON B — FIX 11 + DIAGNÓSTICO DE FILTROS
 # ============================================================
 
 SYMBOLS = [
@@ -47,6 +47,7 @@ STATE_FILE = DATA_DIR / "multi_tf_coinbeaconB_state.json"
 CSV_FILE = DATA_DIR / "multi_tf_coinbeaconB.csv"
 HISTORICO_CSV_FILE = DATA_DIR / "historial_lineas_B.csv"
 CORRELACION_CSV_FILE = DATA_DIR / "correlacion_btc_alt_B.csv"
+DIAG_CSV_FILE = DATA_DIR / "diagnostico_filtros_B.csv"
 
 THROTTLE_FILE = DATA_DIR / "multi_tf_coinbeaconB_throttle.json"
 THROTTLE_REMOTE = (
@@ -71,18 +72,30 @@ COMP_MODO_FILTRO      = "hard"
 COMP_THROTTLE_MIN     = 30
 
 # ============================================================
-# CONFIGURACIÓN SQUEEZE MOMENTUM (LazyBear) — parámetros por defecto
+# CONFIGURACIÓN SQUEEZE MOMENTUM (LazyBear)
 # ============================================================
-SQZ_BB_LENGTH = 20      # Bollinger Bands length
-SQZ_BB_MULT   = 2.0     # Bollinger Bands multiplier
-SQZ_KC_LENGTH = 20      # Keltner Channels length
-SQZ_KC_MULT   = 1.5     # Keltner Channels multiplier
+SQZ_BB_LENGTH = 20
+SQZ_BB_MULT   = 2.0
+SQZ_KC_LENGTH = 20
+SQZ_KC_MULT   = 1.5
 
 # ============================================================
-# CONFIGURACIÓN ADX — umbral de fuerza de tendencia
+# CONFIGURACIÓN ADX
 # ============================================================
 ADX_LENGTH = 14
-ADX_UMBRAL = 23.0       # para BTC: 22-23 según literatura
+ADX_UMBRAL = 23.0
+
+# ============================================================
+# CONTADOR DE DIAGNÓSTICO EN MEMORIA (para el resumen del run)
+# ============================================================
+CONTADOR_FILTROS = {
+    "EDAD": 0,
+    "MOMENTUM": 0,
+    "ADX": 0,
+    "DI": 0,
+    "PASA": 0,
+    "SIN_EXPANSION": 0,
+}
 
 
 def hora_permite_envio():
@@ -179,14 +192,49 @@ def _media(xs):
 
 
 # ============================================================
+# TRADUCCIÓN DE COLORES A TÉRMINOS FÁCILES
+# ============================================================
+
+def traducir_color_momentum(color_interno):
+    mapa = {
+        "lime":   ("SUBE FUERTE",   "🟢", "Alcista confirmado"),
+        "green":  ("PIERDE FUERZA", "🟡", "Alcista agotándose"),
+        "red":    ("CAE FUERTE",    "🔴", "Bajista confirmado"),
+        "maroon": ("GIRA AL ALZA",  "🟠", "Reversión alcista temprana"),
+    }
+    return mapa.get(color_interno, ("DESCONOCIDO", "⚪", "Sin señal"))
+
+
+# ============================================================
+# DIAGNÓSTICO — Registro de cada evaluación del filtro BTC
+# ============================================================
+
+def registrar_diagnostico(fila):
+    """
+    Guarda en CSV cada evaluación del filtro de expansión BTC.
+    Sirve para saber QUÉ filtro detuvo cada señal.
+    """
+    fieldnames = [
+        "ts_lima", "direccion", "edad_h", "fuerza_x",
+        "mom_nombre", "mom_valor", "mom_etiqueta",
+        "adx", "di_plus", "di_minus",
+        "resultado", "razon",
+    ]
+    try:
+        if not DIAG_CSV_FILE.exists():
+            with DIAG_CSV_FILE.open("w", newline="", encoding="utf-8") as f:
+                csv.DictWriter(f, fieldnames=fieldnames).writeheader()
+        with DIAG_CSV_FILE.open("a", newline="", encoding="utf-8") as f:
+            csv.DictWriter(f, fieldnames=fieldnames).writerow(fila)
+    except Exception as e:
+        print(f"   ⚠️ No se pudo escribir diagnóstico: {e}", flush=True)
+
+
+# ============================================================
 # CONSTRUCCIÓN DE VELAS (con high/low/volumen)
 # ============================================================
 
 def construir_velas_de_cache(cache):
-    """
-    Extrae las velas de 5m del cache remoto.
-    Incluye open, high, low, close, volumen y rango.
-    """
     if not cache:
         return []
 
@@ -215,7 +263,6 @@ def construir_velas_de_cache(cache):
         if velas:
             return velas
 
-    # Fallback: usar pulso si no hay velas_5m
     pulso = cache.get("pulso") or []
     datos = []
     for p in pulso:
@@ -241,7 +288,7 @@ def construir_velas_de_cache(cache):
 
 
 # ============================================================
-# SQUEEZE MOMENTUM (LazyBear) — implementación Python pura
+# SQUEEZE MOMENTUM (LazyBear) — Python puro
 # ============================================================
 
 def _sma(serie, length):
@@ -259,7 +306,6 @@ def _stdev(serie, length):
 
 
 def _linreg_value(y):
-    """Valor de la recta de regresión en el último punto."""
     n = len(y)
     if n < 2:
         return y[-1] if y else 0.0
@@ -275,10 +321,6 @@ def _linreg_value(y):
 
 def calcular_squeeze_momentum(velas, length=20, mult=2.0,
                               lengthKC=20, multKC=1.5):
-    """
-    Replica el Squeeze Momentum de LazyBear.
-    Devuelve dict con color, momentum, squeeze_on/off, o None si faltan velas.
-    """
     if len(velas) < 2 * lengthKC:
         return None
 
@@ -287,7 +329,6 @@ def calcular_squeeze_momentum(velas, length=20, mult=2.0,
     closes = [v["close"] for v in velas]
     n = lengthKC
 
-    # ---- Bandas de Bollinger ----
     basis = _sma(closes, length)
     dev   = _stdev(closes, length)
     if basis is None or dev is None:
@@ -295,7 +336,6 @@ def calcular_squeeze_momentum(velas, length=20, mult=2.0,
     dev *= mult
     upperBB, lowerBB = basis + dev, basis - dev
 
-    # ---- Canales de Keltner (con True Range) ----
     ma = _sma(closes, n)
     if ma is None:
         return None
@@ -317,7 +357,6 @@ def calcular_squeeze_momentum(velas, length=20, mult=2.0,
     squeeze_on  = (lowerBB > lowerKC) and (upperBB < upperKC)
     squeeze_off = (lowerBB < lowerKC) and (upperBB > upperKC)
 
-    # ---- Momentum: close - [0.25*(HH+LL) + 0.5*SMA(close)] ----
     serie_mom = []
     for i in range(n - 1, len(closes)):
         hh = max(highs[i - n + 1:i + 1])
@@ -332,7 +371,6 @@ def calcular_squeeze_momentum(velas, length=20, mult=2.0,
     m_actual = _linreg_value(serie_mom[-n:])
     m_prev   = _linreg_value(serie_mom[-n - 1:-1])
 
-    # ---- Color (lógica exacta de LazyBear) ----
     if m_actual > 0:
         color = "lime" if m_actual > m_prev else "green"
     else:
@@ -348,15 +386,10 @@ def calcular_squeeze_momentum(velas, length=20, mult=2.0,
 
 
 # ============================================================
-# ADX (Average Directional Index) — filtro de fuerza de tendencia
+# ADX (Average Directional Index)
 # ============================================================
 
 def calcular_adx(velas, length=14):
-    """
-    Calcula ADX, +DI y -DI a partir de una lista de velas.
-    Cada vela debe tener 'high', 'low', 'close'.
-    Devuelve dict con los últimos valores o None si no hay datos suficientes.
-    """
     n = len(velas)
     if n < length * 2:
         return None
@@ -365,7 +398,6 @@ def calcular_adx(velas, length=14):
     lows = [v["low"] for v in velas]
     closes = [v["close"] for v in velas]
 
-    # --- Calcular True Range y Directional Movements ---
     tr_list, plus_dm_list, minus_dm_list = [], [], []
     for i in range(1, n):
         tr = max(highs[i] - lows[i],
@@ -382,7 +414,6 @@ def calcular_adx(velas, length=14):
         plus_dm_list.append(plus_dm)
         minus_dm_list.append(minus_dm)
 
-    # --- Suavizado de Wilder (Wilder's smoothing) ---
     def smooth(data, period):
         smoothed = [sum(data[:period])]
         for i in range(period, len(data)):
@@ -393,7 +424,6 @@ def calcular_adx(velas, length=14):
     plus_dm_smooth = smooth(plus_dm_list, length)
     minus_dm_smooth = smooth(minus_dm_list, length)
 
-    # --- Calcular +DI, -DI y DX ---
     di_plus_list, di_minus_list, dx_list = [], [], []
     for i in range(len(atr_smooth)):
         if atr_smooth[i] == 0:
@@ -410,7 +440,6 @@ def calcular_adx(velas, length=14):
     if len(dx_list) < length:
         return None
 
-    # --- ADX (media simple de DX) ---
     adx = sum(dx_list[-length:]) / length
 
     return {
@@ -421,18 +450,21 @@ def calcular_adx(velas, length=14):
 
 
 # ============================================================
-# ANÁLISIS DE PATRÓN BTC (compresión → expansión + momentum + ADX)
+# ANÁLISIS DE PATRÓN BTC (con diagnóstico por filtro)
 # ============================================================
 
 def analizar_patron_btc(btc_cache):
+    global CONTADOR_FILTROS
+
     if not btc_cache:
+        CONTADOR_FILTROS["SIN_EXPANSION"] += 1
         return {"pasa": False, "estado": "sin_datos", "detalle": "sin cache BTC"}
 
-    # ⚠️ CORREGIDO: usar construir_velas_de_cache (antes estaba mal escrito)
     velas = construir_velas_de_cache(btc_cache)
     n = len(velas)
 
     if n < COMP_MIN_VELAS:
+        CONTADOR_FILTROS["SIN_EXPANSION"] += 1
         return {"pasa": False, "estado": "sin_datos", "detalle": f"solo {n} velas"}
 
     v = COMP_VENTANA
@@ -440,24 +472,27 @@ def analizar_patron_btc(btc_cache):
     r_pre = _media([x["rango"] for x in velas[-2*v:-v]])
 
     if r_pre <= 0:
+        CONTADOR_FILTROS["SIN_EXPANSION"] += 1
         return {"pasa": False, "estado": "neutral", "detalle": "sin rango previo"}
 
     ratio = r_ult / r_pre
     ahora = datetime.now(timezone.utc).timestamp()
+    ts_lima = (datetime.now(timezone.utc) + LIMA_OFFSET).strftime("%Y-%m-%d %H:%M")
 
-    # --- Squeeze Momentum ---
     sqz = calcular_squeeze_momentum(velas, SQZ_BB_LENGTH, SQZ_BB_MULT,
                                     SQZ_KC_LENGTH, SQZ_KC_MULT)
     if sqz is None:
+        CONTADOR_FILTROS["SIN_EXPANSION"] += 1
         return {"pasa": False, "estado": "neutral",
                 "detalle": "faltan velas para momentum"}
 
     mom_color = sqz["color"]
     mom_val   = sqz["momentum"]
+    mom_nombre, mom_emoji, _ = traducir_color_momentum(mom_color)
 
-    # --- ADX ---
     adx_data = calcular_adx(velas, ADX_LENGTH)
     if adx_data is None:
+        CONTADOR_FILTROS["SIN_EXPANSION"] += 1
         return {"pasa": False, "estado": "neutral",
                 "detalle": "faltan velas para ADX"}
 
@@ -466,8 +501,10 @@ def analizar_patron_btc(btc_cache):
     di_minus = adx_data["di_minus"]
 
     # ═══════════════════════════════════════════════════════════
-    # BÚSQUEDA DE EXPANSIÓN + CONFIRMACIÓN POR MOMENTUM Y ADX
+    # BÚSQUEDA DE EXPANSIÓN CON DIAGNÓSTICO POR FILTRO
     # ═══════════════════════════════════════════════════════════
+    hay_expansion = False
+
     for k in range(max(0, n - 8), n):
         vela_actual = velas[k]["rango"]
         anteriores = [velas[i]["rango"] for i in range(max(0, k-6), k)]
@@ -477,70 +514,130 @@ def analizar_patron_btc(btc_cache):
         if not (prom_previo > 0 and vela_actual > prom_previo * COMP_FACTOR_EXPANSION):
             continue
 
+        hay_expansion = True
+        fuerza_x = vela_actual / prom_previo
         edad_h = (ahora - velas[k]["timestamp"]) / 3600
+        d = "up" if velas[k]["close"] > velas[k]["open"] else "down"
+
+        # Base del registro de diagnóstico
+        base_diag = {
+            "ts_lima": ts_lima,
+            "direccion": d.upper(),
+            "edad_h": f"{edad_h:.2f}",
+            "fuerza_x": f"{fuerza_x:.2f}",
+            "mom_nombre": mom_nombre,
+            "mom_valor": f"{mom_val:+.4f}",
+            "mom_etiqueta": "",
+            "adx": f"{adx_val:.2f}",
+            "di_plus": f"{di_plus:.2f}" if di_plus is not None else "N/A",
+            "di_minus": f"{di_minus:.2f}" if di_minus is not None else "N/A",
+        }
+
+        # ---- FILTRO: EDAD ----
         if edad_h > COMP_HORAS_RECIENTE:
+            base_diag["resultado"] = "RECHAZA"
+            base_diag["razon"] = f"EDAD ({edad_h:.1f}h > {COMP_HORAS_RECIENTE}h)"
+            registrar_diagnostico(base_diag)
+            CONTADOR_FILTROS["EDAD"] += 1
+            print(f"   ⏭️ Expansión {d.upper()} rechazada por EDAD "
+                  f"({edad_h:.1f}h > {COMP_HORAS_RECIENTE}h)", flush=True)
             continue
 
-        d = "up" if velas[k]["close"] > velas[k]["open"] else "down"
         etiqueta = ""
 
-        # --- Confirmación por color de momentum ---
+        # ---- FILTRO: MOMENTUM ----
         if d == "up":
             if mom_color == "maroon":
-                etiqueta = "TEMPRANA"
+                etiqueta = "TEMPRANO"
             elif mom_color == "lime":
-                etiqueta = "CONFIRMADA"
+                etiqueta = "CONFIRMADO"
             else:
-                print(f"   ⏭️ Expansión UP pero momentum {mom_color.upper()} "
-                      f"({mom_val:+.4f}) → ESPERANDO", flush=True)
+                base_diag["resultado"] = "RECHAZA"
+                base_diag["razon"] = f"MOMENTUM ({mom_nombre})"
+                registrar_diagnostico(base_diag)
+                CONTADOR_FILTROS["MOMENTUM"] += 1
+                print(f"   ⏭️ Expansión UP rechazada por MOMENTUM "
+                      f"({mom_nombre}, {mom_val:+.4f})", flush=True)
                 continue
-        else:  # down
+        else:
             if mom_color == "green":
-                etiqueta = "TEMPRANA"
+                etiqueta = "TEMPRANO"
             elif mom_color == "red":
-                etiqueta = "CONFIRMADA"
+                etiqueta = "CONFIRMADO"
             else:
-                print(f"   ⏭️ Expansión DOWN pero momentum {mom_color.upper()} "
-                      f"({mom_val:+.4f}) → ESPERANDO", flush=True)
+                base_diag["resultado"] = "RECHAZA"
+                base_diag["razon"] = f"MOMENTUM ({mom_nombre})"
+                registrar_diagnostico(base_diag)
+                CONTADOR_FILTROS["MOMENTUM"] += 1
+                print(f"   ⏭️ Expansión DOWN rechazada por MOMENTUM "
+                      f"({mom_nombre}, {mom_val:+.4f})", flush=True)
                 continue
 
-        # --- Filtro ADX: fuerza de tendencia ---
+        base_diag["mom_etiqueta"] = etiqueta
+
+        # ---- FILTRO: ADX ----
         if adx_val < ADX_UMBRAL:
-            print(f"   ⏭️ Expansión {d.upper()} pero ADX {adx_val:.1f} < {ADX_UMBRAL} → "
-                  f"mercado sin fuerza, ESPERANDO", flush=True)
+            base_diag["resultado"] = "RECHAZA"
+            base_diag["razon"] = f"ADX ({adx_val:.1f} < {ADX_UMBRAL})"
+            registrar_diagnostico(base_diag)
+            CONTADOR_FILTROS["ADX"] += 1
+            print(f"   ⏭️ Expansión {d.upper()} rechazada por ADX "
+                  f"({adx_val:.1f} < {ADX_UMBRAL})", flush=True)
             continue
 
-        # --- Dirección del ADX: debe estar alineada ---
+        # ---- FILTRO: DI+ / DI- ----
         if d == "up" and (di_plus is None or di_minus is None or di_plus <= di_minus):
-            print(f"   ⏭️ Expansión UP pero DI+ {di_plus} <= DI- {di_minus} → "
-                  f"dirección no confirmada", flush=True)
+            base_diag["resultado"] = "RECHAZA"
+            base_diag["razon"] = f"DI ({di_plus} <= {di_minus})"
+            registrar_diagnostico(base_diag)
+            CONTADOR_FILTROS["DI"] += 1
+            print(f"   ⏭️ Expansión UP rechazada por DI "
+                  f"({di_plus} <= {di_minus})", flush=True)
             continue
         if d == "down" and (di_plus is None or di_minus is None or di_minus <= di_plus):
-            print(f"   ⏭️ Expansión DOWN pero DI- {di_minus} <= DI+ {di_plus} → "
-                  f"dirección no confirmada", flush=True)
+            base_diag["resultado"] = "RECHAZA"
+            base_diag["razon"] = f"DI ({di_minus} <= {di_plus})"
+            registrar_diagnostico(base_diag)
+            CONTADOR_FILTROS["DI"] += 1
+            print(f"   ⏭️ Expansión DOWN rechazada por DI "
+                  f"({di_minus} <= {di_plus})", flush=True)
             continue
 
-        # --- Si pasa todos los filtros, devuelve la alerta ---
+        # ---- PASA TODOS LOS FILTROS ----
+        base_diag["resultado"] = "PASA"
+        base_diag["razon"] = f"OK [{etiqueta}]"
+        registrar_diagnostico(base_diag)
+        CONTADOR_FILTROS["PASA"] += 1
+
+        print(f"   ✅ EXPANSIÓN {d.upper()} CONFIRMADA — "
+              f"{mom_nombre} [{etiqueta}] | ADX {adx_val:.1f}", flush=True)
+
         return {
             "pasa": True,
             "estado": "expandiendo",
             "direccion": d,
             "precio": velas[k]["close"],
-            "fuerza": vela_actual / prom_previo,
+            "fuerza": fuerza_x,
             "edad_h": edad_h,
             "momentum":        mom_val,
             "momentum_prev":   sqz["momentum_prev"],
             "momentum_color":  mom_color,
+            "momentum_nombre": mom_nombre,
+            "momentum_emoji":  mom_emoji,
             "momentum_etiqueta": etiqueta,
             "squeeze_on":      sqz["squeeze_on"],
             "adx": adx_val,
             "di_plus": di_plus,
             "di_minus": di_minus,
             "detalle": (f"expansión {d.upper()} hace {edad_h:.1f}h "
-                        f"({vela_actual/prom_previo:.1f}x) | "
-                        f"mom {mom_color.upper()} [{etiqueta}] {mom_val:+.4f} | "
+                        f"({fuerza_x:.1f}x) | "
+                        f"mom {mom_nombre} [{etiqueta}] {mom_val:+.4f} | "
                         f"ADX {adx_val:.1f}")
         }
+
+    # Si no hubo expansión válida
+    if not hay_expansion:
+        CONTADOR_FILTROS["SIN_EXPANSION"] += 1
 
     if ratio < COMP_RATIO_COMPRESION:
         return {"pasa": True, "estado": "comprimiendo",
@@ -1399,17 +1496,35 @@ def procesar_alertas(alerts, filtered_previous, btc_context, pd_index):
         flecha_pat = "🔥" if pat_estado == "EXPANDIENDO" else "🌀" if pat_estado == "COMPRIMIENDO" else "⚪"
         patron_linea = f"{flecha_pat} Patrón: {pat_estado} — {pat_det}"
 
-        # --- Línea de momentum (si existe) ---
         mom_line = ""
         if pat.get("momentum") is not None:
-            mom_color = (pat.get("momentum_color") or "?").upper()
+            mom_color_interno = (pat.get("momentum_color") or "").lower()
+            mom_nombre, mom_emoji, mom_signif = traducir_color_momentum(mom_color_interno)
             mom_val = pat.get("momentum")
             mom_etq = pat.get("momentum_etiqueta", "")
-            badge = "🟡 TEMPRANA" if mom_etq == "TEMPRANA" else "🟢 CONFIRMADA"
-            mom_line = f"📈 Momentum: {mom_color} {mom_val:+.4f} {badge}\n"
+
+            if mom_etq == "TEMPRANO":
+                badge = "🟠 TEMPRANO"
+            elif mom_etq == "CONFIRMADO":
+                badge = "🟢 CONFIRMADO"
+            else:
+                badge = ""
+
+            mom_line = (f"📈 Momentum: {mom_emoji} {mom_nombre} "
+                        f"{mom_val:+.4f} — {badge}\n")
+            mom_line += f"   ({mom_signif})\n"
+
         if pat.get("adx") is not None:
             adx_val = pat.get("adx")
-            mom_line += f"📊 ADX: {adx_val:.1f} (umbral {ADX_UMBRAL})\n"
+            adx_emoji = "✅" if adx_val >= ADX_UMBRAL else "⚠️"
+            mom_line += f"📊 ADX: {adx_emoji} {adx_val:.1f} (umbral {ADX_UMBRAL})\n"
+
+        sqz_txt = ""
+        if pat.get("squeeze_on") is not None:
+            if pat.get("squeeze_on"):
+                sqz_txt = "🔵 Mercado COMPRIMIDO — resorte cargando\n"
+            else:
+                sqz_txt = "⚪ Mercado LIBERADO — volatilidad activa\n"
 
         msg = (
             f"🧠 MULTI TF\n"
@@ -1422,6 +1537,7 @@ def procesar_alertas(alerts, filtered_previous, btc_context, pd_index):
             f"🎯 Score: {alert['score']:.1f}\n"
             f"📈 Tendencia: {flecha} {tendencia}\n"
             f"{mom_line}"
+            f"{sqz_txt}"
             f"📊 BTC: {btc_dir_str} {btc_modo_str} (RSI4H {btc_rsi4h_str} | Δ{delta_2h_txt})\n"
             f"{pd_linea}\n"
             f"{patron_linea}\n"
@@ -1471,9 +1587,53 @@ def analizar_moneda(symbol, volume_by_symbol, btc_context, btc_rsi_data, hora_li
     return alerts, coin_data, rsi_data
 
 
-def main():
+# ============================================================
+# RESUMEN DE DIAGNÓSTICO AL FINAL DEL RUN
+# ============================================================
+
+def imprimir_resumen_diagnostico():
+    total = sum(CONTADOR_FILTROS.values())
     print("\n" + "=" * 70, flush=True)
-    print("🚀 MULTI TF COINBEACON B — FIX 10 + MOMENTUM + ADX", flush=True)
+    print("🔬 DIAGNÓSTICO — ¿Qué detuvo cada señal en este run?", flush=True)
+    print("=" * 70, flush=True)
+
+    if total == 0:
+        print("   (Sin evaluaciones registradas en este ciclo)", flush=True)
+        return
+
+    # Ordenar por cantidad descendente
+    orden = sorted(CONTADOR_FILTROS.items(), key=lambda x: -x[1])
+
+    for nombre, count in orden:
+        if count == 0:
+            continue
+        pct = (count / total) * 100
+        barra = "█" * int(pct / 3)
+        print(f"   {nombre:15s} {count:3d}  ({pct:5.1f}%)  {barra}", flush=True)
+
+    print("-" * 70, flush=True)
+    print(f"   TOTAL evaluaciones: {total}", flush=True)
+
+    # Sugerencia automática
+    print("\n   💡 Sugerencia automática:", flush=True)
+    if CONTADOR_FILTROS["MOMENTUM"] > total * 0.5:
+        print("      ⚠️ MOMENTUM rechaza >50% → considerar aceptar 'green'/'maroon' como dudoso", flush=True)
+    if CONTADOR_FILTROS["ADX"] > total * 0.4:
+        print("      ⚠️ ADX rechaza >40% → considerar bajar umbral a 20", flush=True)
+    if CONTADOR_FILTROS["EDAD"] > total * 0.3:
+        print("      ⚠️ EDAD rechaza >30% → considerar subir COMP_HORAS_RECIENTE a 3-4h", flush=True)
+    if CONTADOR_FILTROS["PASA"] == 0 and total > 5:
+        print("      ⚠️ 0 señales pasaron → sistema sobre-filtrado, relajar algún umbral", flush=True)
+    if CONTADOR_FILTROS["PASA"] > 0 and CONTADOR_FILTROS["PASA"] <= 3:
+        print("      ✅ Balance saludable — pocas señales pero pasan las buenas", flush=True)
+
+
+def main():
+    global CONTADOR_FILTROS
+    CONTADOR_FILTROS = {k: 0 for k in CONTADOR_FILTROS}
+
+    print("\n" + "=" * 70, flush=True)
+    print("🚀 MULTI TF COINBEACON B — FIX 11 + DIAGNÓSTICO DE FILTROS", flush=True)
     print("=" * 70, flush=True)
     print(f"\nHora UTC: {datetime.now(timezone.utc).isoformat()}", flush=True)
 
@@ -1527,16 +1687,28 @@ def main():
             fuerza = patron_btc.get("fuerza", 0)
             edad_h = patron_btc.get("edad_h", 0)
 
-            mom_color = (patron_btc.get("momentum_color") or "?").upper()
+            mom_color_interno = (patron_btc.get("momentum_color") or "").lower()
+            mom_nombre, mom_emoji, mom_signif = traducir_color_momentum(mom_color_interno)
             mom_val = patron_btc.get("momentum")
             mom_etq = patron_btc.get("momentum_etiqueta", "")
+
+            if mom_etq == "TEMPRANO":
+                badge = "🟠 TEMPRANO"
+            elif mom_etq == "CONFIRMADO":
+                badge = "🟢 CONFIRMADO"
+            else:
+                badge = ""
+
             mom_val_txt = f"{mom_val:+.4f}" if mom_val is not None else "N/A"
-            sqz_txt = "🔵 SQUEEZE ON" if patron_btc.get("squeeze_on") else "⚪ SQUEEZE OFF"
-            badge = "🟡 TEMPRANA" if mom_etq == "TEMPRANA" else "🟢 CONFIRMADA"
+
+            if patron_btc.get("squeeze_on"):
+                sqz_txt = "🔵 Mercado COMPRIMIDO — resorte cargando"
+            else:
+                sqz_txt = "⚪ Mercado LIBERADO — volatilidad activa"
 
             adx_val = patron_btc.get("adx")
-            adx_txt = f"ADX {adx_val:.1f}" if adx_val is not None else "ADX N/A"
-            adx_ok = "✅" if adx_val and adx_val >= ADX_UMBRAL else "⚠️"
+            adx_txt = f"{adx_val:.1f}" if adx_val is not None else "N/A"
+            adx_emoji = "✅" if adx_val and adx_val >= ADX_UMBRAL else "⚠️"
 
             send_telegram_message(
                 f"🧠 MULTI TF\n"
@@ -1544,9 +1716,10 @@ def main():
                 f"━━━━━━━━━━━━━━━━━━━\n"
                 f"📍 Precio: ${precio_actual:,.2f}\n"
                 f"📊 Fuerza: {fuerza:.1f}x hace {edad_h:.1f}h\n"
-                f"📈 Momentum: {mom_color} {mom_val_txt} {badge}\n"
+                f"📈 Momentum: {mom_emoji} {mom_nombre} {mom_val_txt} — {badge}\n"
+                f"   ({mom_signif})\n"
                 f"{sqz_txt}\n"
-                f"📊 ADX: {adx_ok} {adx_txt} (umbral {ADX_UMBRAL})\n"
+                f"📊 ADX: {adx_emoji} {adx_txt} (umbral {ADX_UMBRAL})\n"
                 f"🎯 Dirección: {operacion}\n"
                 f"✅ Filtro pasa → analizando monedas...\n"
                 f"🕐 {ahora_lima_str} (Lima)"
@@ -1558,6 +1731,7 @@ def main():
 
     if COMP_MODO_FILTRO == "hard" and not patron_btc["pasa"]:
         print(f"\n⏸️ Filtro no pasó ({estado_actual.upper()}) — abortando en silencio", flush=True)
+        imprimir_resumen_diagnostico()
         return
 
     print("✅ Filtro pasó\n", flush=True)
@@ -1616,11 +1790,14 @@ def main():
     })
     guardar_estado(new_state)
 
+    imprimir_resumen_diagnostico()
+
     print("\n" + "=" * 70, flush=True)
     print("📢 RESULTADO FINAL", flush=True)
     print("=" * 70, flush=True)
     print(f"Alertas: {sent_count} | LONG: {long_count} | SHORT: {short_count}", flush=True)
     print(f"Patrón: {patron_btc['estado'].upper()}", flush=True)
+    print(f"📄 Diagnóstico guardado en: {DIAG_CSV_FILE}", flush=True)
     print("\n🏁 PROGRAMA TERMINADO", flush=True)
 
 
