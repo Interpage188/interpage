@@ -205,16 +205,15 @@ def analizar_patron_btc(btc_cache):
     if not btc_cache:
         return {"pasa": False, "estado": "sin_datos", "detalle": "sin cache BTC"}
 
-    velas = construir_velas_de_cache(btc_cache)
+    velas = construir_velas(btc_cache, "5m")
     n = len(velas)
 
     if n < COMP_MIN_VELAS:
-        return {"pasa": False, "estado": "sin_datos",
-                "detalle": f"solo {n} velas"}
+        return {"pasa": False, "estado": "sin_datos", "detalle": f"solo {n} velas"}
 
     v = COMP_VENTANA
     r_ult = _media([x["rango"] for x in velas[-v:]])
-    r_pre = _media([x["rango"] for x in velas[-2 * v:-v]])
+    r_pre = _media([x["rango"] for x in velas[-2*v:-v]])
 
     if r_pre <= 0:
         return {"pasa": False, "estado": "neutral", "detalle": "sin rango previo"}
@@ -223,11 +222,11 @@ def analizar_patron_btc(btc_cache):
     ahora = datetime.now(timezone.utc).timestamp()
 
     # ═══════════════════════════════════════════════════════════
-    # CAMBIO 1: ventana ampliada de 4 a 8 velas (40 min)
+    # BÚSQUEDA DE EXPANSIÓN + CONFIRMACIÓN DE TENDENCIA
     # ═══════════════════════════════════════════════════════════
     for k in range(max(0, n - 8), n):
         vela_actual = velas[k]["rango"]
-        anteriores = [velas[i]["rango"] for i in range(max(0, k - 6), k)]
+        anteriores = [velas[i]["rango"] for i in range(max(0, k-6), k)]
         if not anteriores:
             continue
         prom_previo = _media(anteriores)
@@ -235,6 +234,31 @@ def analizar_patron_btc(btc_cache):
             edad_h = (ahora - velas[k]["timestamp"]) / 3600
             if edad_h <= COMP_HORAS_RECIENTE:
                 d = "up" if velas[k]["close"] > velas[k]["open"] else "down"
+
+                # ═══════════════════════════════════════════════════════
+                # CONFIRMACIÓN DE TENDENCIA (últimas 3 velas de 5m)
+                # Solo reporta si las últimas velas siguen la dirección
+                # ═══════════════════════════════════════════════════════
+                ultimas_3 = velas[-3:]
+                suma_3 = sum(v["close"] - v["open"] for v in ultimas_3)
+                verdes = sum(1 for v in ultimas_3 if v["close"] > v["open"])
+                rojas = sum(1 for v in ultimas_3 if v["close"] < v["open"])
+
+                if d == "up":
+                    # Expansión UP → exigir que las últimas 3 velas sean alcistas o planas
+                    if suma_3 < 0 or rojas >= 2:
+                        print(f"   ⏭️ Expansión UP pero últimas 3 velas: "
+                              f"{verdes} verdes / {rojas} rojas (suma {suma_3:+.2f}) "
+                              f"→ ESPERANDO tendencia", flush=True)
+                        continue
+                elif d == "down":
+                    # Expansión DOWN → exigir que las últimas 3 velas sean bajistas o planas
+                    if suma_3 > 0 or verdes >= 2:
+                        print(f"   ⏭️ Expansión DOWN pero últimas 3 velas: "
+                              f"{verdes} verdes / {rojas} rojas (suma {suma_3:+.2f}) "
+                              f"→ ESPERANDO tendencia", flush=True)
+                        continue
+
                 return {
                     "pasa": True,
                     "estado": "expandiendo",
@@ -252,7 +276,6 @@ def analizar_patron_btc(btc_cache):
 
     return {"pasa": False, "estado": "neutral",
             "detalle": f"rango normal ({ratio:.2f}x)"}
-
 
 def cargar_throttle():
     try:
