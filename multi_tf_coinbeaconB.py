@@ -1733,22 +1733,12 @@ def main():
 
     if debe_avisar:
         guardar_throttle(estado_actual)
-        ahora_lima_str = (datetime.now(timezone.utc) + LIMA_OFFSET).strftime("%Y-%m-%d %H:%M")
 
-        if estado_actual == "comprimiendo":
-            atr_pct_txt = patron_btc.get("atr_pct")
-            nr7_val = patron_btc.get("nr7", False)
-            atr_str = f"ATR%: {atr_pct_txt:.1f}" if atr_pct_txt is not None else "ATR%: N/A"
-            nr7_str = " | NR7 ✅" if nr7_val else ""
-            send_telegram_message(
-                f"🧠 MULTI TF\n"
-                f"🌀 COMPRESIÓN BTC DETECTADA\n"
-                f"━━━━━━━━━━━━━━━━━━━\n"
-                f"   {atr_str}{nr7_str}\n"
-                f"⏳ Esperando ruptura (UP o DOWN)\n"
-                f"🕐 {ahora_lima_str} (Lima)"
-            )
-        elif estado_actual == "expandiendo":
+        # ═══════════════════════════════════════════════════════════
+        # SOLO se envía Telegram cuando hay expansión CONFIRMADA.
+        # Estados "comprimiendo" y "neutral" quedan en SILENCIO.
+        # ═══════════════════════════════════════════════════════════
+        if estado_actual == "expandiendo":
             direccion = patron_btc.get("direccion", "?")
             operacion = "LONG" if direccion == "up" else "SHORT"
             emoji_op = "🟢" if direccion == "up" else "🔴"
@@ -1782,6 +1772,8 @@ def main():
             atr_pct_txt = patron_btc.get("atr_pct")
             atr_line = f"📊 ATR%: {atr_pct_txt:.1f}\n" if atr_pct_txt is not None else ""
 
+            ahora_lima_str = (datetime.now(timezone.utc) + LIMA_OFFSET).strftime("%Y-%m-%d %H:%M")
+
             send_telegram_message(
                 f"🧠 MULTI TF\n"
                 f"🔥 EXPANSIÓN {direccion.upper()} — {emoji_op} {operacion} BTC\n"
@@ -1798,7 +1790,7 @@ def main():
                 f"🕐 {ahora_lima_str} (Lima)"
             )
         else:
-            print(f"   ⏸️ Estado {estado_actual} — throttle guardado, sin envío", flush=True)
+            print(f"   🔇 Estado {estado_actual.upper()} — sin envío (solo expansión)", flush=True)
     else:
         print("   🔇 Throttle activo — sin envío", flush=True)
 
