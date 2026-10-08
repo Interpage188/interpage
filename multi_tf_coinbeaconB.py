@@ -586,7 +586,6 @@ def analizar_patron_btc(btc_cache):
             "di_minus": f"{di_minus:.2f}" if di_minus is not None else "N/A",
         }
 
-        # Filtro EDAD
         if edad_h > COMP_HORAS_RECIENTE:
             base_diag["resultado"] = "RECHAZA"
             base_diag["razon"] = f"EDAD ({edad_h:.1f}h > {COMP_HORAS_RECIENTE}h)"
@@ -598,7 +597,6 @@ def analizar_patron_btc(btc_cache):
 
         etiqueta = ""
 
-        # Filtro MOMENTUM
         if d == "up":
             if mom_color == "maroon":
                 etiqueta = "TEMPRANO"
@@ -628,7 +626,6 @@ def analizar_patron_btc(btc_cache):
 
         base_diag["mom_etiqueta"] = etiqueta
 
-        # Filtro ADX
         if adx_val < ADX_UMBRAL:
             base_diag["resultado"] = "RECHAZA"
             base_diag["razon"] = f"ADX ({adx_val:.1f} < {ADX_UMBRAL})"
@@ -638,7 +635,6 @@ def analizar_patron_btc(btc_cache):
                   f"({adx_val:.1f} < {ADX_UMBRAL})", flush=True)
             continue
 
-        # Filtro DI
         if d == "up" and (di_plus is None or di_minus is None or di_plus <= di_minus):
             base_diag["resultado"] = "RECHAZA"
             base_diag["razon"] = f"DI ({di_plus} <= {di_minus})"
@@ -654,7 +650,6 @@ def analizar_patron_btc(btc_cache):
             print(f"   ⏭️ Expansión DOWN rechazada por DI", flush=True)
             continue
 
-        # PASA
         base_diag["resultado"] = "PASA"
         base_diag["razon"] = f"OK [{etiqueta}]"
         registrar_diagnostico(base_diag)
@@ -704,16 +699,99 @@ def analizar_patron_btc(btc_cache):
         detalle = f"compresión ATR%={atr_pct:.1f} (<{ATR_UMBRAL_COMPRESION}){nr7_txt}"
         print(f"   🌀 COMPRESIÓN detectada — {detalle}", flush=True)
         return {
-            "pasa": False,                          # ← NO autoriza operar
+            "pasa": False,
             "estado": "comprimiendo",
             "atr_pct": atr_pct,
             "nr7": nr7,
             "detalle": detalle,
         }
 
+    # ═══════════════════════════════════════════════════════════
+    # ✅ NUEVO: Detectar caída fuerte DISTRIBUIDA
+    # (aunque no haya vela explosiva única)
+    # ═══════════════════════════════════════════════════════════
+    if len(velas) >= 24:
+        # Cambio en las últimas 12 velas (= 1h si velas son de 5m, o 12h si son de 1h)
+        # Usamos las últimas 12 velas como ventana de "corto plazo"
+        vela_ini = velas[-12]
+        p_actual = velas[-1]["close"]
+        p_ini = vela_ini["close"]
+
+        if p_ini > 0:
+            cambio_reciente = ((p_actual - p_ini) / p_ini) * 100
+
+            # Volumen reciente vs previo
+            vols_recientes = [v.get("volumen") for v in velas[-12:] if v.get("volumen")]
+            vols_previos = [v.get("volumen") for v in velas[-24:-12] if v.get("volumen")]
+
+            vol_ratio = 1.0
+            if vols_recientes and vols_previos:
+                prom_rec = sum(vols_recientes) / len(vols_recientes)
+                prom_prev = sum(vols_previos) / len(vols_previos)
+                if prom_prev > 0:
+                    vol_ratio = prom_rec / prom_prev
+
+            # CAÍDA FUERTE DISTRIBUIDA
+            if cambio_reciente < -2.0 and vol_ratio >= 1.3:
+                print(f"   🔴 CAÍDA FUERTE DISTRIBUIDA: {cambio_reciente:+.2f}% | vol {vol_ratio:.2f}x", flush=True)
+                CONTADOR_FILTROS["PASA"] += 1
+
+                return {
+                    "pasa": True,
+                    "estado": "expandiendo",
+                    "direccion": "down",
+                    "precio": p_actual,
+                    "fuerza": vol_ratio,
+                    "edad_h": 1.0,
+                    "momentum":        mom_val,
+                    "momentum_prev":   sqz["momentum_prev"],
+                    "momentum_color":  mom_color,
+                    "momentum_nombre": mom_nombre,
+                    "momentum_emoji":  mom_emoji,
+                    "momentum_etiqueta": "CONFIRMADO",
+                    "squeeze_on":      sqz["squeeze_on"],
+                    "adx": adx_val,
+                    "di_plus": di_plus,
+                    "di_minus": di_minus,
+                    "atr_pct": atr_pct,
+                    "nr7": nr7,
+                    "detalle": (f"caída distribuida {cambio_reciente:+.2f}% | "
+                                f"vol {vol_ratio:.2f}x | ADX {adx_val:.1f}"),
+                }
+
+            # SUBIDA FUERTE DISTRIBUIDA
+            if cambio_reciente > 2.0 and vol_ratio >= 1.3:
+                print(f"   🟢 SUBIDA FUERTE DISTRIBUIDA: {cambio_reciente:+.2f}% | vol {vol_ratio:.2f}x", flush=True)
+                CONTADOR_FILTROS["PASA"] += 1
+
+                return {
+                    "pasa": True,
+                    "estado": "expandiendo",
+                    "direccion": "up",
+                    "precio": p_actual,
+                    "fuerza": vol_ratio,
+                    "edad_h": 1.0,
+                    "momentum":        mom_val,
+                    "momentum_prev":   sqz["momentum_prev"],
+                    "momentum_color":  mom_color,
+                    "momentum_nombre": mom_nombre,
+                    "momentum_emoji":  mom_emoji,
+                    "momentum_etiqueta": "CONFIRMADO",
+                    "squeeze_on":      sqz["squeeze_on"],
+                    "adx": adx_val,
+                    "di_plus": di_plus,
+                    "di_minus": di_minus,
+                    "atr_pct": atr_pct,
+                    "nr7": nr7,
+                    "detalle": (f"subida distribuida {cambio_reciente:+.2f}% | "
+                                f"vol {vol_ratio:.2f}x | ADX {adx_val:.1f}"),
+                }
+
+    # ═══════════════════════════════════════════════════════════
+    # RETURN FINAL — Estado neutral (sin oportunidad)
+    # ═══════════════════════════════════════════════════════════
     return {"pasa": False, "estado": "neutral",
             "detalle": f"rango normal (ATR% {atr_pct if atr_pct is not None else 'N/A'})"}
-
 
 # ============================================================
 # THROTTLE
