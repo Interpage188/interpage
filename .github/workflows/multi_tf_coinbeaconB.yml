@@ -1,12 +1,10 @@
 name: MULTI TF COINBEACON B
 
-on:
-  schedule:
-    - cron: '*/5 * * * *'
-  workflow_dispatch:
-
 permissions:
   contents: write
+
+on:
+  workflow_dispatch:
 
 concurrency:
   group: coinbeaconB-interpage
@@ -15,17 +13,16 @@ concurrency:
 jobs:
   monitor:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
       - name: Install dependencies
         run: |
@@ -62,28 +59,30 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add \
-            data/multi_tf_coinbeaconB.csv \
-            data/multi_tf_coinbeaconB_state.json \
-            data/historial_lineas_B.csv \
-            data/correlacion_btc_alt_B.csv \
-            data/multi_tf_coinbeaconB_throttle.json \
-            2>/dev/null || true
+          # ✅ Añadir TODO data/ (incluye diagnostico_filtros_B.csv)
+          git add data/ 2>/dev/null || true
 
           if git diff --cached --quiet; then
             echo "📭 No hay cambios para guardar."
             exit 0
           fi
 
-          git commit -m "Actualizar Multi-TF CoinBeaconB"
+          git commit -m "Multi TF CoinBeaconB: update [skip ci]"
 
           for i in 1 2 3; do
             echo "🔄 Push intento $i..."
 
-            git pull --rebase origin main && \
-            git push origin HEAD:main && \
-            echo "✅ Push OK" && \
-            exit 0
+            git pull --rebase origin main || {
+              echo "⚠️ Pull falló, reintento $i"
+              git rebase --abort 2>/dev/null || true
+              sleep 10
+              continue
+            }
+
+            if git push origin HEAD:main; then
+              echo "✅ Push OK"
+              exit 0
+            fi
 
             echo "⚠️ Push falló."
             sleep 10
