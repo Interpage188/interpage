@@ -57,19 +57,54 @@ print(f"  Precio 1h atrás: ${p_1h_atras:,.1f}")
 print(f"  Cambio 1h:      {cambio_1h:+.2f}%")
 print(f"  Vol ratio 1h:   {vol_ratio:.2f}x")
 
-# Chequeo del filtro
-print(f"\n🔍 ¿Cumple filtro del fix? (caída -2% + vol 1.3x)")
-if cambio_1h < -2.0 and vol_ratio >= 1.3:
-    print(f"  ✅ SÍ → Debería disparar SHORT")
+# Chequeo del filtro con los UMBRALES NUEVOS
+print(f"\n{'='*70}")
+print(f"🔍 CHEQUEO DEL FILTRO")
+print(f"{'='*70}")
+
+# Bloque 1: caída/subida fuerte (-1.3% + vol 1.3x)
+dispara_por_caida = cambio_1h < -1.3 and vol_ratio >= 1.3
+dispara_por_subida = cambio_1h > 1.3 and vol_ratio >= 1.3
+
+# Bloque 2: volumen masivo (3x+ sin importar cambio)
+dispara_por_vol = vol_ratio >= 3.0 and abs(cambio_1h) >= 0.3
+
+if dispara_por_caida:
+    print(f"  🔴 SÍ → Dispararía por CAÍDA FUERTE")
+    print(f"     Condición: cambio_1h ({cambio_1h:+.2f}%) < -1.3  ✅")
+    print(f"     Condición: vol_ratio ({vol_ratio:.2f}x) >= 1.3    ✅")
+elif dispara_por_subida:
+    print(f"  🟢 SÍ → Dispararía por SUBIDA FUERTE")
+    print(f"     Condición: cambio_1h ({cambio_1h:+.2f}%) > +1.3  ✅")
+    print(f"     Condición: vol_ratio ({vol_ratio:.2f}x) >= 1.3    ✅")
+elif dispara_por_vol:
+    direccion = "SHORT" if cambio_1h < 0 else "LONG"
+    print(f"  🔥 SÍ → Dispararía por VOLUMEN MASIVO → {direccion}")
+    print(f"     Condición: vol_ratio ({vol_ratio:.2f}x) >= 3.0    ✅")
+    print(f"     Condición: |cambio| ({abs(cambio_1h):.2f}%) >= 0.3  ✅")
 else:
     print(f"  ❌ NO → El bot está correcto en no disparar")
-    if cambio_1h >= -2.0:
-        print(f"     (falta {abs(-2.0 - cambio_1h):.2f}% para llegar al -2%)")
-    if vol_ratio < 1.3:
-        print(f"     (falta {1.3 - vol_ratio:.2f}x de volumen)")
+    print(f"\n  Chequeos:")
+    print(f"    Bloque 1 (caída):   -1.3% requiere {abs(-1.3 - cambio_1h):.2f}% más de caída"
+          if cambio_1h > -1.3 else f"    Bloque 1 (caída):   ✅ cumple")
+    print(f"    Bloque 2 (subida):  +1.3% requiere {abs(1.3 - cambio_1h):.2f}% más de subida"
+          if cambio_1h < 1.3 else f"    Bloque 2 (subida):  ✅ cumple")
+    print(f"    Bloque 3 (volumen): 3.0x requiere {3.0 - vol_ratio:.2f}x más de volumen"
+          if vol_ratio < 3.0 else f"    Bloque 3 (volumen): ✅ cumple")
 
 # Chequeo del volumen acumulado
-print(f"\n📊 VOLUMEN:")
+print(f"\n{'='*70}")
+print(f"📊 VOLUMEN")
+print(f"{'='*70}")
 print(f"  Promedio últimas 12 velas: {sum(vols_recientes)/len(vols_recientes):.4f}")
 if vols_previos:
     print(f"  Promedio previas 12 velas:  {sum(vols_previos)/len(vols_previos):.4f}")
+    print(f"  Ratio:                      {vol_ratio:.2f}x")
+
+# Resumen del estado
+print(f"\n{'='*70}")
+print(f"🎯 RESUMEN")
+print(f"{'='*70}")
+print(f"  Cambio 1h:  {cambio_1h:+.2f}%")
+print(f"  Vol ratio:  {vol_ratio:.2f}x")
+print(f"  Estado BTC: {'EXPANDIENDO' if (dispara_por_caida or dispara_por_subida or dispara_por_vol) else 'NEUTRAL'}")
