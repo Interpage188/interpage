@@ -707,12 +707,11 @@ def analizar_patron_btc(btc_cache):
         }
 
     # ═══════════════════════════════════════════════════════════
-    # ✅ NUEVO: Detectar caída fuerte DISTRIBUIDA
+    # ✅ NUEVO: Detectar caída/subida fuerte DISTRIBUIDA
     # (aunque no haya vela explosiva única)
     # ═══════════════════════════════════════════════════════════
     if len(velas) >= 24:
-        # Cambio en las últimas 12 velas (= 1h si velas son de 5m, o 12h si son de 1h)
-        # Usamos las últimas 12 velas como ventana de "corto plazo"
+        # Cambio en las últimas 12 velas (= 1h si velas son de 5m)
         vela_ini = velas[-12]
         p_actual = velas[-1]["close"]
         p_ini = vela_ini["close"]
@@ -731,8 +730,8 @@ def analizar_patron_btc(btc_cache):
                 if prom_prev > 0:
                     vol_ratio = prom_rec / prom_prev
 
-            # CAÍDA FUERTE DISTRIBUIDA
-            if cambio_reciente < -2.0 and vol_ratio >= 1.3:
+            # ═══ CAÍDA FUERTE DISTRIBUIDA ═══
+            if cambio_reciente < -1.3 and vol_ratio >= 1.3:
                 print(f"   🔴 CAÍDA FUERTE DISTRIBUIDA: {cambio_reciente:+.2f}% | vol {vol_ratio:.2f}x", flush=True)
                 CONTADOR_FILTROS["PASA"] += 1
 
@@ -759,8 +758,38 @@ def analizar_patron_btc(btc_cache):
                                 f"vol {vol_ratio:.2f}x | ADX {adx_val:.1f}"),
                 }
 
-            # SUBIDA FUERTE DISTRIBUIDA
-            if cambio_reciente > 2.0 and vol_ratio >= 1.3:
+            # ═══ VOLUMEN MASIVO (cambio pequeño pero volumen 3x+) ═══
+            if vol_ratio >= 3.0 and abs(cambio_reciente) >= 0.3:
+                direccion = "down" if cambio_reciente < 0 else "up"
+                emoji = "🔴" if direccion == "down" else "🟢"
+                print(f"   {emoji} VOLUMEN MASIVO BTC: {cambio_reciente:+.2f}% | vol {vol_ratio:.2f}x", flush=True)
+                CONTADOR_FILTROS["PASA"] += 1
+
+                return {
+                    "pasa": True,
+                    "estado": "expandiendo",
+                    "direccion": direccion,
+                    "precio": p_actual,
+                    "fuerza": vol_ratio,
+                    "edad_h": 1.0,
+                    "momentum":        mom_val,
+                    "momentum_prev":   sqz["momentum_prev"],
+                    "momentum_color":  mom_color,
+                    "momentum_nombre": mom_nombre,
+                    "momentum_emoji":  mom_emoji,
+                    "momentum_etiqueta": "CONFIRMADO",
+                    "squeeze_on":      sqz["squeeze_on"],
+                    "adx": adx_val,
+                    "di_plus": di_plus,
+                    "di_minus": di_minus,
+                    "atr_pct": atr_pct,
+                    "nr7": nr7,
+                    "detalle": (f"volumen masivo {vol_ratio:.2f}x | "
+                                f"cambio {cambio_reciente:+.2f}% | ADX {adx_val:.1f}"),
+                }
+
+            # ═══ SUBIDA FUERTE DISTRIBUIDA ═══
+            if cambio_reciente > 1.3 and vol_ratio >= 1.3:
                 print(f"   🟢 SUBIDA FUERTE DISTRIBUIDA: {cambio_reciente:+.2f}% | vol {vol_ratio:.2f}x", flush=True)
                 CONTADOR_FILTROS["PASA"] += 1
 
@@ -792,7 +821,6 @@ def analizar_patron_btc(btc_cache):
     # ═══════════════════════════════════════════════════════════
     return {"pasa": False, "estado": "neutral",
             "detalle": f"rango normal (ATR% {atr_pct if atr_pct is not None else 'N/A'})"}
-
 # ============================================================
 # THROTTLE
 # ============================================================
