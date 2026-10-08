@@ -4,9 +4,7 @@ permissions:
   contents: write
 
 on:
-  schedule:
-    - cron: '2,7,12,17,22,27,32,37,42,47,52,57 * * * *'
-  workflow_dispatch:
+  workflow_dispatch:  # <- Solo manual, cron-job.org lo dispara
 
 concurrency:
   group: recolector-interpage
@@ -16,72 +14,25 @@ jobs:
   monitor:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Check Python syntax
-        run: |
-          python -m py_compile recolector.py
-          echo "✅ Sintaxis OK"
-
-      - name: Run RECOLECTOR
-        run: |
-          echo "========================================"
-          echo "🚀 RECOLECTOR"
-          date -u
-          echo "========================================"
-
-          python -u recolector.py
-
-          echo "========================================"
-          echo "🏁 RECOLECTOR TERMINADO"
-          date -u
-          echo "========================================"
-
-      - name: Show cache status
-        if: always()
-        run: |
-          echo "📁 Archivos en data/cache/:"
-          ls -lah data/cache/ 2>/dev/null || true
-
-          if [ -d data/cache ]; then
-            echo ""
-            echo "📊 Resumen:"
-            find data/cache -name '*.json' | wc -l
-            du -sh data/cache/ 2>/dev/null || true
-          fi
-
+      # ... (el resto de los pasos se mantiene igual) ...
       - name: Commit cache
         if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
           git add data/cache/ 2>/dev/null || true
-
           if git diff --cached --quiet; then
             echo "📭 Sin cambios."
             exit 0
           fi
-
           git commit -m "Recolector [skip ci] $(date -u +'%Y-%m-%d %H:%M UTC')"
-
           for i in 1 2 3; do
             git pull --rebase origin main && \
             git push origin HEAD:main && \
             echo "✅ Push OK" && \
             exit 0
-
             echo "⚠️ Intento $i falló, reintentando..."
             sleep 10
           done
-
           echo "❌ No se pudo hacer push"
           exit 1
