@@ -1697,6 +1697,18 @@ def main():
     global CONTADOR_FILTROS
     CONTADOR_FILTROS = {k: 0 for k in CONTADOR_FILTROS}
 
+    # ✅ NUEVO: Forzar creación del CSV de diagnóstico
+    DIAG_CSV_FILE.parent.mkdir(exist_ok=True)
+    if not DIAG_CSV_FILE.exists():
+        fieldnames = [
+            "ts_lima", "direccion", "edad_h", "fuerza_x",
+            "mom_nombre", "mom_valor", "mom_etiqueta",
+            "adx", "di_plus", "di_minus",
+            "resultado", "razon",
+        ]
+        with DIAG_CSV_FILE.open("w", newline="", encoding="utf-8") as f:
+            csv.DictWriter(f, fieldnames=fieldnames).writeheader()
+
     print("\n" + "=" * 70, flush=True)
     print("🚀 MULTI TF COINBEACON B — FIX 12 + ATR PERCENTIL + NR7", flush=True)
     print("=" * 70, flush=True)
